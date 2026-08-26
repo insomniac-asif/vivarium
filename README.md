@@ -39,7 +39,7 @@ picker. See [docs/format.md](docs/format.md) for the full contract.
 ## Install
 
 ```
-/plugin marketplace add <this-repo>
+/plugin marketplace add insomniac-asif/vivarium
 /plugin install vivarium
 /vivarium:setup
 ```
