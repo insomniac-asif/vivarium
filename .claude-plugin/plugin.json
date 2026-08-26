@@ -1,0 +1,11 @@
+{
+  "name": "vivarium",
+  "version": "0.1.0",
+  "description": "Desktop pets for Claude Code. Renders Codex-compatible v2 sprite pets (16 look directions included) as a transparent desktop overlay driven by live session state, ships a statusline pet, and lets Claude hatch brand-new pets with the bundled hatch-pet skill.",
+  "author": {
+    "name": "Absent Born Labs",
+    "url": "https://absentbornlabs.org"
+  },
+  "license": "MIT",
+  "keywords": ["pet", "mascot", "desktop-pet", "statusline", "overlay", "codex-pets", "sprite"]
+}

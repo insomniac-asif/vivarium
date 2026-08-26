@@ -1,0 +1,13 @@
+{
+  "name": "vivarium-overlay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Vivarium desktop pet overlay for Claude Code - renders Codex-compatible v2 sprite pets",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^44.0.0"
+  }
+}

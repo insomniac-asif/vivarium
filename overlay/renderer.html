@@ -1,0 +1,259 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>vivarium</title>
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+  body.debug { background: #0e0e12; }
+  #stage { display: block; }
+  #caption { position: fixed; left: 6px; top: 4px; color: #666; font: 11px monospace; display: none; }
+  body.debug #caption { display: block; }
+</style>
+</head>
+<body>
+<canvas id="stage" width="200" height="224"></canvas>
+<div id="caption"></div>
+<script>
+'use strict';
+// ---------------------------------------------------------------------------
+// Vivarium sprite engine — renders Codex-compatible v2 pets.
+// Contract: 8x11 atlas of 192x208 cells, rows 0-8 standard states with fixed
+// per-frame durations, rows 9-10 sixteen clockwise look directions (000 = up,
+// neutral deadzone falls back to idle).
+// ---------------------------------------------------------------------------
+var CELL_W = 192, CELL_H = 208, COLS = 8;
+var PAD_X = 4, PAD_Y = 4;
+
+var BASE_ROWS = {
+  'idle':          { row: 0, dur: [280, 110, 110, 140, 140, 320], loop: true },
+  'running-right': { row: 1, dur: [120, 120, 120, 120, 120, 120, 120, 220], loop: true },
+  'running-left':  { row: 2, dur: [120, 120, 120, 120, 120, 120, 120, 220], loop: true },
+  'waving':        { row: 3, dur: [140, 140, 140, 280], loop: false },
+  'jumping':       { row: 4, dur: [140, 140, 140, 140, 280], loop: false },
+  'failed':        { row: 5, dur: [140, 140, 140, 140, 140, 140, 140, 240], loop: true },
+  'waiting':       { row: 6, dur: [150, 150, 150, 150, 150, 260], loop: true },
+  'running':       { row: 7, dur: [120, 120, 120, 120, 120, 220], loop: true },
+  'review':        { row: 8, dur: [150, 150, 150, 150, 150, 280], loop: true },
+};
+var ROWS = cloneRows(BASE_ROWS);
+
+function cloneRows(src) {
+  var out = {};
+  for (var k in src) out[k] = { row: src[k].row, dur: src[k].dur.slice(), loop: src[k].loop };
+  return out;
+}
+
+// Real pets sometimes carry extra frames beyond the nominal contract (Axi
+// ships 7 idle frames). Scan each standard row for populated cells past the
+// nominal count and extend that row's schedule so they play too.
+function extendRows(img) {
+  var rows = cloneRows(BASE_ROWS);
+  try {
+    var off = document.createElement('canvas');
+    off.width = img.width; off.height = img.height;
+    var octx = off.getContext('2d', { willReadFrequently: true });
+    octx.drawImage(img, 0, 0);
+    for (var k in rows) {
+      var r = rows[k];
+      for (var col = r.dur.length; col < COLS; col++) {
+        var d = octx.getImageData(col * CELL_W, r.row * CELL_H, CELL_W, CELL_H).data;
+        var populated = false;
+        for (var i = 3; i < d.length; i += 64) { if (d[i] > 10) { populated = true; break; } }
+        if (!populated) break;
+        r.dur.push(r.dur[Math.floor(r.dur.length / 2)]);
+      }
+    }
+  } catch (e) {}
+  return rows;
+}
+
+// Claude Code session mood -> base animation state
+var MOOD_TO_STATE = {
+  working: 'running',
+  needs_you: 'waiting',
+  review: 'review',
+  failed: 'failed',
+  idle: 'idle',
+  asleep: 'idle',
+  done: 'idle', // 'done' also queues a one-shot wave (handled in setState)
+};
+
+var canvas = document.getElementById('stage');
+var ctx = canvas.getContext('2d');
+var caption = document.getElementById('caption');
+
+var sheet = null;          // Image once loaded
+var petName = '';
+var state = {
+  mood: 'idle',
+  sessions: 0,
+  lookDir: -1,             // 0-15 look index, -1 = neutral deadzone
+  dragging: false,
+  dragDir: 0,              // -1 left, +1 right while dragging
+};
+var anim = {
+  name: 'idle',
+  frame: 0,
+  until: 0,                // timestamp when current frame ends
+  oneshot: null,           // one-shot animation name overriding base
+  slow: 1,                 // duration multiplier (asleep = 2.4)
+};
+var lastMood = 'idle';
+
+function baseState() {
+  if (state.dragging) return state.dragDir < 0 ? 'running-left' : 'running-right';
+  return MOOD_TO_STATE[state.mood] || 'idle';
+}
+
+function startAnim(name, now) {
+  anim.name = name;
+  anim.frame = 0;
+  anim.until = now + (ROWS[name].dur[0] || 150) * anim.slow;
+}
+
+function playOneshot(name) {
+  if (!ROWS[name]) return;
+  anim.oneshot = name;
+  startAnim(name, performance.now());
+}
+
+function lookCell(dir) {
+  // dir 0-15 clockwise from 000=up. Row 9: 0-7, row 10: 8-15.
+  return { row: dir < 8 ? 9 : 10, col: dir % 8 };
+}
+
+function tick(now) {
+  requestAnimationFrame(tick);
+  var target = anim.oneshot || baseState();
+  anim.slow = (state.mood === 'asleep' && !anim.oneshot) ? 2.4 : 1;
+
+  if (anim.name !== target) startAnim(target, now);
+  var spec = ROWS[anim.name];
+  if (now >= anim.until) {
+    if (anim.frame + 1 >= spec.dur.length) {
+      if (spec.loop) {
+        anim.frame = 0;
+        anim.until = now + spec.dur[0] * anim.slow;
+      } else if (anim.oneshot) {
+        anim.oneshot = null;
+        startAnim(baseState(), now);
+      } else {
+        anim.frame = spec.dur.length - 1; // hold last frame
+        anim.until = now + 1e9;
+      }
+    } else {
+      anim.frame++;
+      anim.until = now + spec.dur[anim.frame] * anim.slow;
+    }
+  }
+  draw();
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!sheet) return;
+  var row, col;
+  // Idle + pointer outside deadzone -> static look-direction cell.
+  if (!anim.oneshot && !state.dragging && anim.name === 'idle' &&
+      state.lookDir >= 0 && state.mood !== 'asleep') {
+    var lc = lookCell(state.lookDir);
+    row = lc.row; col = lc.col;
+  } else {
+    row = ROWS[anim.name].row; col = anim.frame;
+  }
+  ctx.drawImage(sheet, col * CELL_W, row * CELL_H, CELL_W, CELL_H,
+                PAD_X, PAD_Y, CELL_W, CELL_H);
+  // session dots (2+ live sessions), dim red, bottom-center
+  if (state.sessions >= 2) {
+    var n = Math.min(state.sessions, 5);
+    ctx.fillStyle = '#8b1a1e';
+    var total = n * 8 - 5;
+    var x0 = (canvas.width - total) / 2;
+    for (var i = 0; i < n; i++) {
+      ctx.beginPath();
+      ctx.arc(x0 + i * 8 + 1.5, canvas.height - 6, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+// ---- public API -----------------------------------------------------------
+window.vivarium = {
+  setPet: function (meta, spritesheetSrc) {
+    petName = meta && meta.displayName || '';
+    var img = new Image();
+    img.onload = function () { ROWS = extendRows(img); sheet = img; };
+    img.src = spritesheetSrc;
+  },
+  setState: function (s) {
+    if (!s) return;
+    if (typeof s.sessions === 'number') state.sessions = s.sessions;
+    if (typeof s.lookDir === 'number') state.lookDir = s.lookDir;
+    if (typeof s.dragging === 'boolean') state.dragging = s.dragging;
+    if (typeof s.dragDir === 'number' && s.dragDir !== 0) state.dragDir = s.dragDir;
+    if (s.event === 'SessionStart') playOneshot('jumping');
+    if (s.mood && s.mood !== lastMood) {
+      if (s.mood === 'done') playOneshot('waving');
+      lastMood = s.mood;
+    }
+    if (s.mood) state.mood = s.mood;
+    if (s.debugCaption !== undefined) caption.textContent = s.debugCaption;
+  },
+};
+
+requestAnimationFrame(tick);
+
+// test hook: lets headless checks pump the engine without rAF
+window.__viv = {
+  hasSheet: function () { return !!sheet; },
+  step: function (ms) { tick(performance.now() + (ms || 0)); },
+  current: function () { return { name: anim.name, frame: anim.frame, oneshot: anim.oneshot }; },
+  occupancy: function () {
+    var d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    var n = 0;
+    for (var i = 3; i < d.length; i += 4) if (d[i] > 10) n++;
+    return n;
+  },
+};
+
+// ---- debug mode: ?debug&pet=<relative-url-to-pet-dir> ---------------------
+(function () {
+  var q = new URLSearchParams(location.search);
+  if (!q.has('debug')) return;
+  document.body.classList.add('debug');
+  var petUrl = q.get('pet') || 'pets-test/axi';
+  fetch(petUrl + '/pet.json').then(function (r) { return r.json(); }).then(function (meta) {
+    window.vivarium.setPet(meta, petUrl + '/' + (meta.spritesheetPath || 'spritesheet.webp'));
+  });
+  var phases = [
+    { mood: 'working', t: 3000, cap: 'working -> running row' },
+    { mood: 'needs_you', t: 3000, cap: 'needs_you -> waiting row' },
+    { mood: 'done', t: 3000, cap: 'done -> wave oneshot -> idle' },
+    { mood: 'failed', t: 3000, cap: 'failed row' },
+    { mood: 'review', t: 3000, cap: 'review row' },
+    { mood: 'idle', t: 500, cap: 'idle', ev: 'SessionStart' },
+    { mood: 'idle', t: 2500, cap: 'session-start jump -> idle' },
+    { mood: 'idle', t: 6000, cap: 'look sweep', look: true },
+    { mood: 'asleep', t: 3000, cap: 'asleep (slow idle)' },
+  ];
+  var i = 0, lookTimer = null;
+  function next() {
+    var p = phases[i % phases.length]; i++;
+    if (lookTimer) { clearInterval(lookTimer); lookTimer = null; }
+    window.vivarium.setState({ mood: p.mood, sessions: 3, lookDir: -1, event: p.ev, debugCaption: p.cap });
+    if (p.look) {
+      var d = 0;
+      lookTimer = setInterval(function () {
+        window.vivarium.setState({ lookDir: d % 16, debugCaption: 'look ' + (d % 16) * 22.5 + '°' });
+        d++;
+      }, 350);
+    }
+    setTimeout(next, p.t);
+  }
+  next();
+})();
+</script>
+<script src="bridge.js"></script>
+</body>
+</html>

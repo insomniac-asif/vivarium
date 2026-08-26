@@ -1,0 +1,14 @@
+{
+  "name": "vivarium",
+  "owner": {
+    "name": "Absent Born Labs",
+    "url": "https://absentbornlabs.org"
+  },
+  "plugins": [
+    {
+      "name": "vivarium",
+      "source": "./",
+      "description": "Desktop pets for Claude Code - Codex-compatible v2 sprite pets, statusline pet, and a hatch-pet generation skill."
+    }
+  ]
+}
