@@ -29,11 +29,13 @@ picker. See [docs/format.md](docs/format.md) for the full contract.
 - **Status line pet**: a zero-dependency text pet (`~(•v•)~`) showing context
   pressure ("% burned"), model, git branch, and session cost. It doubles as
   the overlay's heartbeat.
-- **Hatch pets with Claude**: the bundled `hatch-pet` skill walks Claude
-  through generating a new pet — base art from any image-generation tool you
-  have connected, row-by-row animation strips, then deterministic slicing,
-  assembly, validation, contact sheets, and preview GIFs via the included
-  Python scripts.
+- **Hatch pets with Claude**: the bundled `hatch-pet` skill turns art into a
+  pet. Give it **one image** — an AI render, an illustration, anything — and
+  `rig_from_render.py` animates it into all 73 atlas cells in seconds with
+  squash-and-stretch, lean, bob, collapse and ember grading; identity cannot
+  drift because every frame is the same pixels. Or generate per-frame art with
+  a connected image model and run it through the deterministic slicing,
+  assembly, validation, contact-sheet and preview pipeline.
 - **Multi-session aware**: tiny dots under the pet count your live sessions.
 
 ## Install

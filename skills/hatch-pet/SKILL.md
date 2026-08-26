@@ -104,6 +104,31 @@ form of this skill — do not start from a generic mascot:
    The overlay's pet picker (right-click) lists it immediately. The same
    package dropped into `~/.codex/pets/` works in Codex CLI.
 
+## Rig from one render (fastest path, perfect identity)
+
+The best path when you have ONE good render of the creature and no
+reference-capable image model: `rig_from_render.py` cuts the creature out and
+animates it with per-frame transforms — squash and stretch, lean, bob, lift,
+collapse, plus ember/glow grading — producing all 73 cells in seconds.
+
+```
+python scripts/rig_from_render.py canon.png --output-dir run/frames-rig
+python scripts/compose_atlas.py --frames-root run/frames-rig \
+  --output run/spritesheet.png --webp-output run/spritesheet.webp
+```
+
+Why it wins: every frame is literally the same pixels, so identity cannot
+drift; the art tier equals the render's; there is no quota, no wait, and no
+per-frame QA. Tune the choreography in `recipes()` / `look_recipe()` — that
+table IS the animation, and it is worth iterating on per pet (a serpent leans
+differently than a chibi).
+
+Its honest limit: whole-body motion cannot raise a wing or turn a head, so
+`waving` reads as a greeting bounce and the look rows as directional lean
+(legitimate body language for a chibi; the v2 deadzone keeps neutral on idle).
+When you later get per-limb rows from a reference-capable model, drop those
+rows in over the rigged ones — the atlas is just files.
+
 ## Harvest-and-curate (recommended for local SDXL-class models)
 
 Prompt-only SDXL will NOT reliably produce exact N-pose strips — it draws
