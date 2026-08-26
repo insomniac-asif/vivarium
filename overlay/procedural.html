@@ -17,11 +17,14 @@
 <script>
 'use strict';
 // ---------------------------------------------------------------------------
-// Huma — procedural built-in pet for Vivarium.
-// An ash-phoenix chick, permanently pre-rebirth: soot-black coal body,
-// signal-red ember veins that ignite while Claude works, eyes small but
-// hotter than the veins. Fails to an ash pile with one live ember (sprite row
-// only), overburns past 85% context, burns bright at night and grey by day.
+// Huma (the egg) — procedural built-in pet for Vivarium.
+// Huma is an ash-phoenix, permanently pre-rebirth — so the built-in pet is
+// the unhatched EGG: a soot-black coal shell, signal-red crack-veins that
+// ignite while Claude works, one live ember crack always burning hotter than
+// the rest. Rocks when a session needs you, overburns past 85% context,
+// burns bright at night and banks grey in daylight. The hatched chick is a
+// sprite pet — generate it with the hatch-pet skill; this egg is what every
+// install starts with.
 // ---------------------------------------------------------------------------
 var W = 200, H = 224;
 var canvas = document.getElementById('stage');
@@ -46,27 +49,22 @@ var HOT_CORE = [255, 233, 221];  // white-hot (eye cores, overburn)
 var state = { mood: 'idle', ctxPct: null, drowsy: false, sessions: 0, nightGlow: true };
 var lastMood = 'idle';
 
-// eased params: {value, target}
+// eased params: {value}
 var P = {
-  ign:   { v: 0.28, t: 0.28 }, // ember ignition 0..1
-  hunch: { v: 0, t: 0 },       // forward work-hunch px
-  headUp:{ v: 0, t: 0 },       // needs_you tilt-back
-  sink:  { v: 0, t: 0 },       // asleep settle px
-  lid:   { v: 0, t: 0 },       // eyelid closure 0..1
-  wing:  { v: 0, t: 0 },       // wing lift (wave/flap) 0..1
+  ign:   { v: 0.28 },          // ember ignition 0..1
+  hunch: { v: 0 },             // forward work-lean px
+  sink:  { v: 0 },             // asleep settle px
 };
 var TARGETS = {
-  working:   { ign: 1.0,  hunch: 4, headUp: 0, sink: 0, lid: 0 },
-  needs_you: { ign: 0.72, hunch: 0, headUp: 1, sink: 0, lid: 0 },
-  done:      { ign: 0.5,  hunch: 0, headUp: 0, sink: 0, lid: 0.35 },
-  idle:      { ign: 0.28, hunch: 0, headUp: 0, sink: 0, lid: 0 },
-  asleep:    { ign: 0.07, hunch: 0, headUp: 0, sink: 7, lid: 1 },
+  working:   { ign: 1.0,  hunch: 4, sink: 0 },
+  needs_you: { ign: 0.72, hunch: 0, sink: 0 },
+  done:      { ign: 0.5,  hunch: 0, sink: 0 },
+  idle:      { ign: 0.28, hunch: 0, sink: 0 },
+  asleep:    { ign: 0.07, hunch: 0, sink: 7 },
 };
 
 var lastT = null;
-var blinkAt = 4000 + Math.random() * 3000;
-var blink = 0;              // 0..1 closure from blinking
-var wiggleT = -1;           // done-entry wiggle clock
+var wiggleT = -1;           // done-entry settle-wiggle clock
 var hopT = -1;              // needs_you hop clock
 var nextHop = 2500;
 
@@ -96,14 +94,9 @@ function frame(tms) {
   var tgt = TARGETS[state.mood] || TARGETS.idle;
   for (var key in P) {
     var goal = (key in tgt) ? tgt[key] : 0;
-    if (key === 'lid' && state.drowsy && state.mood !== 'asleep') goal = Math.max(goal, 0.6);
+    if (key === 'ign' && state.drowsy && state.mood !== 'working') goal *= 0.6;
     P[key].v = lerp(P[key].v, goal, k);
   }
-
-  // blink scheduling (suppressed under heavy lids)
-  blinkAt -= dt;
-  if (blinkAt <= 0 && P.lid.v < 0.5) { blink = 1; blinkAt = 4000 + Math.random() * 3000; }
-  blink = Math.max(0, blink - dt / 130);
 
   if (wiggleT >= 0) wiggleT += dt;
   if (wiggleT > 700) wiggleT = -1;
@@ -137,25 +130,22 @@ function draw(t) {
 
   var cx = W / 2 + sway + wig;
   var cy = 128 + P.sink.v + bob + hop + P.hunch.v * 0.5;
-  var tilt = -P.headUp.v * 0.10 + P.hunch.v * 0.014 + wig * 0.01;
+  var tilt = P.hunch.v * 0.014 + wig * 0.01;
+
+  // needs_you: the egg rocks side to side instead of looking up
+  var rock = (state.mood === 'needs_you') ? Math.sin(t * 3.2) * 0.09 : 0;
 
   ctx.save();
   ctx.translate(cx, cy);
-  ctx.rotate(tilt);
+  ctx.rotate(tilt + rock);
   ctx.scale(1 / breath, breath);
 
-  // tail nub
-  ctx.fillStyle = SOOT_LO;
-  ctx.beginPath();
-  ctx.ellipse(-46, 26, 12, 8, 0.6, 0, Math.PI * 2);
-  ctx.fill();
-
-  // body — soot egg with radial coal shading
-  var g = ctx.createRadialGradient(-8, -18, 8, 0, 4, 66);
+  // body — soot EGG (Huma, pre-hatch) with radial coal shading
+  var g = ctx.createRadialGradient(-8, -22, 8, 0, 6, 70);
   g.addColorStop(0, SOOT_HI); g.addColorStop(0.65, SOOT); g.addColorStop(1, SOOT_LO);
   ctx.fillStyle = g;
   ctx.beginPath();
-  ctx.ellipse(0, 0, 52, 58, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, 4, 46, 60, 0, 0, Math.PI * 2);
   ctx.fill();
 
   // coal facets (static darker patches)
@@ -165,20 +155,10 @@ function draw(t) {
       ctx.beginPath(); ctx.ellipse(f[0], f[1], f[2], f[3], f[4], 0, Math.PI * 2); ctx.fill();
     });
 
-  // wings — stubby, slightly darker; lift on wave/needs_you flap
-  var wingLift = P.wing.v * 26 + (state.mood === 'needs_you' ? Math.max(0, Math.sin(t * 6)) * 4 : 0);
-  ctx.fillStyle = SOOT_LO;
-  ctx.beginPath();
-  ctx.ellipse(-48, 20 - wingLift * 0.4, 10, 17, 0.45 - wingLift * 0.02, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.ellipse(48, 20 - wingLift, 10, 17, -0.45 + wingLift * 0.03, 0, Math.PI * 2);
-  ctx.fill();
-
-  // ember veins — clipped to body, glow pass + core pass (+ overburn cores)
+  // ember crack-veins — clipped to the shell, glow pass + core pass
   ctx.save();
   ctx.beginPath();
-  ctx.ellipse(0, 0, 52, 58, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, 4, 46, 60, 0, 0, Math.PI * 2);
   ctx.clip();
   // vein color: dim->bright ember by ignition, banked toward grey in daylight
   var base = [
@@ -208,56 +188,27 @@ function draw(t) {
       ctx.stroke();
     }
   });
+  // the live ember — one crack near the top always burns hotter than the rest
+  var emberPulse = 0.55 + 0.45 * Math.sin(t * (state.mood === 'working' ? 4.8 : 1.6));
+  ctx.strokeStyle = baseCss;
+  ctx.globalAlpha = Math.min(1, (0.5 + 0.5 * ign) * emberPulse);
+  ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  ctx.moveTo(-4, -30); ctx.lineTo(4, -20); ctx.lineTo(-2, -10);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgb(' + HOT_CORE.join(',') + ')';
+  ctx.globalAlpha = Math.min(1, (0.25 + 0.6 * ign) * emberPulse * (1 - dayBank * 0.5));
+  ctx.lineWidth = 0.9;
+  ctx.stroke();
   ctx.globalAlpha = 1;
   ctx.restore();
 
-  // eyes — small, hotter than the veins; always the brightest thing
-  var eyeY = -18 - P.headUp.v * 4;
-  var lidTotal = Math.min(1, Math.max(P.lid.v, blink));
-  [-20, 20].forEach(function (ex) {
-    if (lidTotal < 0.98) {
-      var eyeIgn = Math.max(0.55, ign) * (1 - dayBank * 0.25);
-      ctx.globalAlpha = 0.3 * eyeIgn;
-      ctx.fillStyle = 'rgb(255,90,74)';
-      ctx.beginPath(); ctx.arc(ex, eyeY, 7, 0, Math.PI * 2); ctx.fill();
-      ctx.globalAlpha = 1;
-      ctx.beginPath(); ctx.arc(ex, eyeY, 4.2, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = 'rgb(' + HOT_CORE.join(',') + ')';
-      ctx.beginPath(); ctx.arc(ex, eyeY, 1.7 + overburn * 0.8, 0, Math.PI * 2); ctx.fill();
-      // eyelid sweep (soot-colored)
-      if (lidTotal > 0.02) {
-        ctx.fillStyle = SOOT;
-        ctx.fillRect(ex - 8, eyeY - 8, 16, 16 * lidTotal - 8 + 1);
-      }
-    } else {
-      // closed: dark seam with a faint banked ember underneath
-      ctx.strokeStyle = 'rgba(11,11,13,1)';
-      ctx.lineWidth = 1.6;
-      ctx.beginPath(); ctx.moveTo(ex - 4, eyeY); ctx.quadraticCurveTo(ex, eyeY + 2, ex + 4, eyeY); ctx.stroke();
-      ctx.strokeStyle = 'rgba(255,43,51,' + (0.12 + 0.06 * Math.sin(t * 1.3)) + ')';
-      ctx.lineWidth = 0.8;
-      ctx.beginPath(); ctx.moveTo(ex - 3, eyeY + 1.5); ctx.quadraticCurveTo(ex, eyeY + 3, ex + 3, eyeY + 1.5); ctx.stroke();
-    }
-  });
-
-  // beak — small triangle, slightly lighter than the face so it silhouettes,
-  // with an ember-lit lower edge
-  ctx.fillStyle = '#33333b';
-  ctx.beginPath();
-  ctx.moveTo(-5.5, -9); ctx.lineTo(5.5, -9); ctx.lineTo(0, -1);
-  ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = baseCss;
-  ctx.globalAlpha = 0.55 + 0.45 * ign;
-  ctx.lineWidth = 1.2;
-  ctx.beginPath(); ctx.moveTo(-4.5, -8); ctx.lineTo(0, -1.6); ctx.lineTo(4.5, -8); ctx.stroke();
-  ctx.globalAlpha = 1;
-
-  // rim light — separates the soot body from dark wallpapers
+  // rim light — separates the soot shell from dark wallpapers
   ctx.strokeStyle = '#3a3a42';
   ctx.globalAlpha = 0.55;
   ctx.lineWidth = 1.4;
   ctx.beginPath();
-  ctx.ellipse(0, 0, 51.4, 57.4, 0, -Math.PI * 0.92, -Math.PI * 0.12);
+  ctx.ellipse(0, 4, 45.4, 59.4, 0, -Math.PI * 0.92, -Math.PI * 0.12);
   ctx.stroke();
   ctx.globalAlpha = 1;
 
@@ -315,7 +266,7 @@ window.__huma = {
   document.body.classList.add('debug');
   var phases = [
     { mood: 'working', cap: 'working — veins ignited' },
-    { mood: 'needs_you', cap: 'needs_you — head up, flap, hop' },
+    { mood: 'needs_you', cap: 'needs_you — rocking, hop' },
     { mood: 'done', cap: 'done — wiggle, content' },
     { mood: 'idle', cap: 'idle — banked embers' },
     { mood: 'idle', cap: 'overburn — ctx 92%', ctx: 92 },

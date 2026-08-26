@@ -5,6 +5,11 @@ Walks the dependency-ordered jobs, generates each pending image, then
 auto-extracts row strips into 192x208 cells via extract_row_strip.py.
 Backends:
   gemini  - Google AI Studio image API (needs GEMINI_API_KEY env var)
+  abl     - a local OpenAI-compatible diffusion server (SDXL-class), e.g.
+            diffusion_server.py from the ABL stack. ABL_DIFFUSION_URL env var
+            overrides the default http://127.0.0.1:8102. Uses each job's
+            compact "sd_prompt" (SDXL CLIP truncates at ~77 tokens) and
+            ignores reference images (no reference conditioning).
   flux    - local ComfyUI at http://127.0.0.1:8188 (needs a workflow template;
             see the NotImplementedError message for wiring instructions)
 
@@ -27,7 +32,25 @@ SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 GEMINI_MODEL = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
 
 
-def gen_gemini(prompt, ref_paths, out_path):
+def gen_abl(prompt, ref_paths, out_path, job=None):
+    url = os.environ.get("ABL_DIFFUSION_URL", "http://127.0.0.1:8102")
+    job = job or {}
+    prompt = job.get("sd_prompt") or prompt
+    size = job.get("size") or ("1024x1024" if job.get("kind") == "base" else "1536x640")
+    body = json.dumps({"prompt": prompt, "n": 1, "size": size,
+                       "quality": "high", "response_format": "b64_json"}).encode()
+    req = urllib.request.Request(url + "/v1/images/generations", data=body,
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=900) as r:
+        resp = json.load(r)
+    if "error" in resp:
+        raise RuntimeError(f"diffusion server: {resp['error']}")
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "wb") as f:
+        f.write(base64.b64decode(resp["data"][0]["b64_json"]))
+
+
+def gen_gemini(prompt, ref_paths, out_path, job=None):
     key = os.environ.get("GEMINI_API_KEY")
     if not key:
         raise SystemExit("GEMINI_API_KEY is not set")
@@ -54,7 +77,7 @@ def gen_gemini(prompt, ref_paths, out_path):
     raise RuntimeError(f"no image in Gemini response: {json.dumps(resp)[:400]}")
 
 
-def gen_flux(prompt, ref_paths, out_path):
+def gen_flux(prompt, ref_paths, out_path, job=None):
     raise NotImplementedError(
         "FLUX backend not wired yet. Plan: run ComfyUI on the local GPU, save a "
         "workflow template with a reference-image (Kontext/redux) node, then POST "
@@ -64,7 +87,7 @@ def gen_flux(prompt, ref_paths, out_path):
     )
 
 
-BACKENDS = {"gemini": gen_gemini, "flux": gen_flux}
+BACKENDS = {"gemini": gen_gemini, "abl": gen_abl, "flux": gen_flux}
 
 
 def main():
@@ -97,7 +120,7 @@ def main():
             refs = [os.path.join(run, r) for r in j.get("refs", [])]
             out = os.path.join(run, j["output"])
             print(f"[{j['id']}] generating ({args.backend}) -> {j['output']}")
-            gen(prompt, refs, out)
+            gen(prompt, refs, out, j)
             if j["kind"] in ("row-strip", "look-row", "cardinal-strip"):
                 cells = os.path.join(run, "frames",
                                      "look" if j["kind"] == "look-row" else j["id"])
