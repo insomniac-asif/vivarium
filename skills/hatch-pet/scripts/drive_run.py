@@ -52,9 +52,9 @@ def gen_abl(prompt, ref_paths, out_path, job=None):
 
 
 def gen_gemini(prompt, ref_paths, out_path, job=None):
-    key = os.environ.get("GEMINI_API_KEY")
+    key = os.environ.get("GEMINI_API_KEY") or os.environ.get("ABL_GEMINI_KEY")
     if not key:
-        raise SystemExit("GEMINI_API_KEY is not set")
+        raise SystemExit("GEMINI_API_KEY (or ABL_GEMINI_KEY) is not set")
     parts = [{"text": prompt}]
     for rp in ref_paths:
         with open(rp, "rb") as f:
