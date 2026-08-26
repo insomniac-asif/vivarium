@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: "Space Grotesk", system-ui, sans-serif; }
+    a { color: #ff2b33; } a:hover { color: #ff5a4a; }
+    .st { background: #14141a; border: 1px solid #23232b; border-radius: 4px; padding: 14px; display: flex; flex-direction: column; gap: 6px; }
+    .nm { color: #e8e8ec; font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+    .fr { color: #ff2b33; font-size: 11px; }
+    .ds { color: #9a9aa2; font-size: 12px; line-height: 1.5; }
+  </style>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&amp;display=swap">
+</helmet>
+<div style="width: 1000px; height: 860px; background: #0e0e12; padding: 28px; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px">
+  <div style="color: #6a6a6e; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase">Atlas rows - v2 contract, generated reference-grounded on the hero render</div>
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
+    <div class="st"><div class="nm">idle</div><div class="fr">6 frames</div><div class="ds">Banked dim embers, subtle breathing, one blink. Calm, low-distraction.</div></div>
+    <div class="st"><div class="nm">running (work)</div><div class="fr">6 frames</div><div class="ds">Hunched forward, chest core blazing molten, mantle flared, head down intent. The ignition state.</div></div>
+    <div class="st"><div class="nm">waiting</div><div class="fr">6 frames</div><div class="ds">Looking up at the viewer, huge pleading furnace eyes glowing brighter. Needs input.</div></div>
+    <div class="st"><div class="nm">running-right</div><div class="fr">8 frames</div><div class="ds">Bounding waddle run cycle, facing and traveling right. Plays during rightward drags.</div></div>
+    <div class="st"><div class="nm">running-left</div><div class="fr">8 frames</div><div class="ds">Mirror cadence of running-right, leftward. Plays during leftward drags.</div></div>
+    <div class="st"><div class="nm">waving</div><div class="fr">4 frames</div><div class="ds">One small claw raised in greeting. One-shot on turn-complete and on petting.</div></div>
+    <div class="st"><div class="nm">jumping</div><div class="fr">5 frames</div><div class="ds">Crouch, spring, midair with mantle flared, descent, landing. One-shot on session start.</div></div>
+    <div class="st"><div class="nm">failed</div><div class="fr">8 frames</div><div class="ds">The collapse: slumping, sinking, dissolving into a round grey ash pile with ONE live ember still glowing inside.</div></div>
+    <div class="st"><div class="nm">review</div><div class="fr">6 frames</div><div class="ds">Head bowed over finished work, one eye narrowed. Studious.</div></div>
+    <div class="st"><div class="nm">look rows A + B</div><div class="fr">16 cells - 22.5&#176; steps, 000 = up</div><div class="ds">One clockwise head-turn family; big eyes lead, body planted. Drives cursor-following gaze with a neutral deadzone.</div></div>
+    <div class="st"><div class="nm">overburn (engine)</div><div class="fr">tint layer</div><div class="ds">Past 85% context the ember fissures pulse white-hot. Compositor effect over any state.</div></div>
+    <div class="st"><div class="nm">day / night (engine)</div><div class="fr">tint layer</div><div class="ds">Night-bright embers; banked grey in daylight. Compositor grading, not atlas rows.</div></div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

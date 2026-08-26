@@ -13,107 +13,27 @@
   </style>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&amp;display=swap">
 </helmet>
-<div style="width: 640px; height: 640px; background: #0e0e12; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px">
-  <svg viewBox="0 0 220 200" width="520" height="472" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <linearGradient id="soot" x1="0" y1="0" x2="0.4" y2="1">
-        <stop offset="0" stop-color="#2b2b32"></stop>
-        <stop offset="0.55" stop-color="#1f1f24"></stop>
-        <stop offset="1" stop-color="#141418"></stop>
-      </linearGradient>
-      <linearGradient id="membrane" x1="0" y1="0" x2="0.2" y2="1">
-        <stop offset="0" stop-color="#1b1b20"></stop>
-        <stop offset="1" stop-color="#111114"></stop>
-      </linearGradient>
-    </defs>
-
-    <!-- tail: wraps around the front-left, live ember at the tip -->
-    <path d="M 52 152
-             C 34 158 18 152 12 138
-             C 8 126 14 114 26 110
-             C 22 122 26 132 38 136
-             C 48 139 56 144 58 150 Z" fill="#17171b"></path>
-    <g style="opacity: {{ignition}}">
-      <path d="M 26 110 C 22 100 24 90 32 84 C 36 92 36 102 32 110 C 30 113 27 113 26 110 Z" fill="{{ember}}"></path>
-      <path d="M 29 104 C 28 98 29 92 32 88" fill="none" stroke="#ffe9dd" stroke-width="1.2" stroke-linecap="round" stroke-opacity="0.7"></path>
-    </g>
-
-    <!-- haunch + body: low, chest-heavy whelp -->
-    <path d="M 48 150
-             C 44 116 60 84 96 72
-             C 122 63 148 68 162 84
-             C 172 96 174 112 168 128
-             C 162 150 140 166 108 172
-             C 76 178 52 170 48 150 Z" fill="url(#soot)"></path>
-
-    <!-- dorsal ember-spikes along the back -->
-    <g style="opacity: {{ignition}}">
-      <path d="M 70 92 L 64 78 L 78 86 Z" fill="{{ember}}" fill-opacity="0.85"></path>
-      <path d="M 88 80 L 84 64 L 98 76 Z" fill="{{ember}}" fill-opacity="0.9"></path>
-      <path d="M 108 72 L 106 56 L 120 70 Z" fill="{{ember}}"></path>
-    </g>
-
-    <!-- folded wing: arm bone + draped membrane with ember veins inside -->
-    <path d="M 78 96
-             C 64 82 56 66 58 50
-             C 74 56 86 68 92 84 Z" fill="#17171b"></path>
-    <path d="M 58 50
-             C 78 54 94 66 100 84
-             C 104 108 96 134 76 148
-             C 60 156 48 148 46 132
-             C 45 116 49 100 58 50 Z" fill="url(#membrane)"></path>
-    <path d="M 58 50 C 70 76 74 106 68 138" fill="none" stroke="#0e0e10" stroke-width="1.6" stroke-linecap="round"></path>
-    <path d="M 60 62 C 76 82 84 108 82 136" fill="none" stroke="#0e0e10" stroke-width="1.3" stroke-linecap="round"></path>
-    <!-- ember veins glowing through the membrane -->
-    <g fill="none" stroke-linecap="round" style="opacity: {{ignition}}">
-      <path d="M 56 78 L 62 92 L 58 106 L 64 120" stroke="{{ember}}" stroke-width="2.6" stroke-opacity="0.25"></path>
-      <path d="M 56 78 L 62 92 L 58 106 L 64 120" stroke="{{ember}}" stroke-width="1.1"></path>
-      <path d="M 70 90 L 74 104 L 70 118" stroke="{{ember}}" stroke-width="1.0" stroke-opacity="0.8"></path>
-    </g>
-
-    <!-- chest crack-veins -->
-    <g fill="none" stroke-linecap="round" style="opacity: {{ignition}}">
-      <path d="M 152 102 L 144 114 L 150 128 L 142 140" stroke="{{ember}}" stroke-width="3" stroke-opacity="0.28"></path>
-      <path d="M 152 102 L 144 114 L 150 128 L 142 140" stroke="{{ember}}" stroke-width="1.3"></path>
-      <path d="M 132 122 L 126 134 L 132 146" stroke="{{ember}}" stroke-width="1.0" stroke-opacity="0.85"></path>
-    </g>
-
-    <!-- neck + wedge head, facing right -->
-    <path d="M 128 88
-             C 130 72 140 60 158 56
-             C 176 53 192 60 202 74
-             C 208 82 206 88 198 90
-             C 186 92 174 96 164 102
-             C 148 110 132 104 128 88 Z" fill="url(#soot)"></path>
-    <!-- horns, swept back -->
-    <path d="M 152 60 C 144 48 134 40 122 36 C 132 34 144 38 152 46 C 156 51 156 56 152 60 Z" fill="#141418"></path>
-    <path d="M 166 56 C 162 44 154 34 144 28 C 154 28 164 34 170 44 C 172 49 171 53 166 56 Z" fill="#141418"></path>
-    <path d="M 150 58 C 144 49 136 42 128 38 M 164 54 C 160 44 154 36 147 31" fill="none" stroke="{{ember}}" stroke-width="1" stroke-opacity="0.5" stroke-linecap="round"></path>
-
-    <!-- brow, eye (small, hotter than the veins), nostril -->
-    <path d="M 158 70 C 166 66 176 66 184 70" fill="none" stroke="#0e0e10" stroke-width="2.6" stroke-linecap="round"></path>
-    <circle cx="170" cy="76" r="4.4" fill="{{ember}}"></circle>
-    <circle cx="171" cy="75" r="1.7" fill="#ffe9dd"></circle>
-    <circle cx="198" cy="80" r="1.6" fill="{{ember}}" fill-opacity="0.9"></circle>
-    <!-- mouth line, slight underbite -->
-    <path d="M 202 86 C 194 90 186 92 178 92" fill="none" stroke="#0e0e10" stroke-width="1.6" stroke-linecap="round"></path>
-
-    <!-- front legs with claws -->
-    <path d="M 112 150 C 112 158 112 164 112 170 M 134 146 C 135 154 136 162 136 168" stroke="#17171b" stroke-width="10" stroke-linecap="round" fill="none"></path>
-    <path d="M 108 172 L 102 180 M 112 172 L 112 182 M 116 172 L 122 180 M 132 170 L 126 178 M 136 170 L 136 180 M 140 170 L 146 178" stroke="#0b0b0d" stroke-width="2.6" stroke-linecap="round" fill="none"></path>
-  </svg>
-  <div style="color: #6a6a6e; font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase">Huma - permanently pre-rebirth</div>
+<div style="width: 760px; height: 1040px; background: #0e0e12; padding: 36px; box-sizing: border-box; display: flex; flex-direction: column; gap: 20px">
+  <img src="dragon-b.jpg" alt="Huma" style="width: 100%; border-radius: 4px">
+  <div style="display: flex; flex-direction: column; gap: 8px">
+    <div style="color: #e8e8ec; font-size: 30px; font-weight: 600; letter-spacing: 0.04em">HUMA</div>
+    <div style="color: #9a9aa2; font-size: 14px; line-height: 1.55">Ash-dragon whelp, permanently pre-rebirth. Coal-black body cracked with
+ember fissures, a charred mantle framing the head, furnace eyes brighter than
+everything else on him, and a molten core in the chest that will not go out.
+Brooding, not cute. He ignites when the work runs, pleads when a session
+needs you, and collapses to an ash pile with one live ember when things fail.</div>
+  </div>
+  <div style="display: flex; gap: 10px">
+    <div style="width: 44px; height: 44px; background: #141418; border: 1px solid #2b2b32; border-radius: 3px"></div>
+    <div style="width: 44px; height: 44px; background: #1f1f24; border: 1px solid #2b2b32; border-radius: 3px"></div>
+    <div style="width: 44px; height: 44px; background: #2b2b32; border-radius: 3px"></div>
+    <div style="width: 44px; height: 44px; background: #8b1a1e; border-radius: 3px"></div>
+    <div style="width: 44px; height: 44px; background: #ff2b33; border-radius: 3px"></div>
+    <div style="width: 44px; height: 44px; background: #ffb35c; border-radius: 3px"></div>
+    <div style="width: 44px; height: 44px; background: #ffe9dd; border-radius: 3px"></div>
+  </div>
+  <div style="color: #6a6a6e; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase">soot 141418 / 1f1f24 / 2b2b32 - ember 8b1a1e - signal ff2b33 - furnace ffb35c - hot core ffe9dd</div>
 </div>
 </x-dc>
-<script data-dc-script data-props='{"ember":{"editor":"color","default":"#ff2b33","options":["#ff2b33","#ff4020","#e8222e","#ff5a4a"]},"ignition":{"editor":"range","default":1,"min":0.15,"max":1,"step":0.05},"$preview":{"width":640,"height":640}}'>
-class Component extends DCLogic {
-  renderVals() {
-    return {
-      ember: this.props.ember ?? '#ff2b33',
-      ignition: this.props.ignition ?? 1,
-    };
-  }
-}
-</script>
 </body>
 </html>

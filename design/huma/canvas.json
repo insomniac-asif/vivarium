@@ -1,11 +1,11 @@
 {
   "artboards": [
-    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 640, "h": 640 },
-    { "file": "Poses.dc.html", "x": 740, "y": 0, "w": 1080, "h": 780, "title": "State poses" },
-    { "file": "LookRing.dc.html", "x": 0, "y": 920, "w": 1080, "h": 420, "title": "Look directions" }
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 760, "h": 1040 },
+    { "file": "States.dc.html", "x": 860, "y": 0, "w": 1000, "h": 860, "title": "Atlas rows" },
+    { "file": "Alternates.dc.html", "x": 860, "y": 1000, "w": 1000, "h": 700, "title": "Unchosen candidates" }
   ],
   "annotations": [
-    { "id": "identity-note", "x": 0, "y": -150, "w": 560, "text": "Huma - vector rig for the vivarium sprite atlas.\nIdentity canon: plump soot-black bird, red ember flame-crest, crack-veins on chest, eyes hotter than the veins, black talons. Not cute.\nEdit anything - shapes, colors, the ember tweak on the hero. When it looks right, the rig rasterizes into all 73 atlas frames." }
+    { "id": "identity-note", "x": 0, "y": -150, "w": 560, "text": "Huma - identity board.\nThe hero render IS the canon: every atlas row generates reference-grounded on it via Gemini. Edit the brief, palette or row specs here; the hero image itself changes only by picking a new render." }
   ],
   "launch": { "view": "canvas" }
 }
