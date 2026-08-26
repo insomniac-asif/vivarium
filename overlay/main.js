@@ -35,7 +35,8 @@ if (!app.requestSingleInstanceLock()) app.quit();
 
 // ---- config ---------------------------------------------------------------
 function loadConfig() {
-  try { return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')); } catch { return {}; }
+  // strip a UTF-8 BOM — Windows tools love to add one
+  try { return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^﻿/, '')); } catch { return {}; }
 }
 function saveConfig(patch) {
   try {
