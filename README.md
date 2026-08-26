@@ -21,7 +21,11 @@ picker. See [docs/format.md](docs/format.md) for the full contract.
   directional runs while you drag it, and slowed idle when everything sleeps.
 - **v2 look directions, actually implemented**: when idle, the pet's gaze
   follows your mouse cursor around all 16 clockwise look cells, with the
-  contract's neutral deadzone falling back to idle.
+  contract's neutral deadzone falling back to idle — a spec'd Codex feature
+  reportedly dormant even in Codex's own builds.
+- **Petting**: click the pet (a press that doesn't move) and it reacts —
+  sprite pets wave, the built-in egg hops and flares its embers. Dragging
+  plays directional run animations. See [docs/interactions.md](docs/interactions.md).
 - **Status line pet**: a zero-dependency text pet (`~(•v•)~`) showing context
   pressure ("% burned"), model, git branch, and session cost. It doubles as
   the overlay's heartbeat.

@@ -18,6 +18,30 @@ missing. If no image-generation tool is connected (check for MCP tools that
 generate images), tell the user hatching needs one — or accept user-provided
 row strips / an existing atlas instead.
 
+## Hatching a personal pet (the full flow)
+
+When the user asks for a pet "based on what you know about me" — the highest
+form of this skill — do not start from a generic mascot:
+
+1. **Ground the identity in your memory of the user.** Their colors, their
+   symbols, their story, what they are building, what they return to. The pet
+   should be decodable only by them — a private mythology, not a logo. Write
+   the identity as a short brief (creature, surface, accent, the one metaphor
+   it embodies) and offer 2-3 name options grounded in the same material.
+   Let them pick; record their choice as canon and never soften it later.
+2. **Design before generating.** If Claude Design is available (the `design`
+   skill), build a design canvas of the pet — a hero rendering, the nine
+   state poses, look-direction head studies — so the user can reshape it by
+   hand before any atlas work. The canvas is the identity contract; the
+   user's edited version wins over your draft. (See `design/huma/` in this
+   repo for the reference canvas of Vivarium's own pet.)
+3. **Generate frames** from the approved identity — via a reference-capable
+   image model (strip prompts + extract_row_strip.py), a local SDXL-class
+   model (harvest-and-curate below), or by rasterizing the approved vector
+   rig directly.
+4. **Assemble and verify** with the deterministic scripts, review the contact
+   sheet WITH the user, then package.
+
 ## Pipeline
 
 1. **Base identity.** Generate (or accept) one full-body reference of the pet

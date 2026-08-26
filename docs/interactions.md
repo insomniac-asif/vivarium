@@ -1,0 +1,42 @@
+# Pet interactions
+
+What the ecosystem does, and what Vivarium implements.
+
+## Verified behavior elsewhere
+
+- **Codex pet (official)**: clicking the pet focuses/opens the app — a
+  launcher, not a toy; an attached tray opens activities. Draggable overlay.
+  No petting, feeding, or sounds. State triggers: running = agent working,
+  waiting = needs approval/input, review = completed with unread activity,
+  failed = error; priority when several chats compete:
+  needs-input > blocked > ready > running. The 16 look-direction rows are
+  specified to follow the pointer with a neutral deadzone, but reportedly are
+  never sampled in current builds.
+- **Claude Code `/buddy`** (leaked easter egg): `pet` command played a ~2.5s
+  floating-hearts animation with a unique in-character response each time;
+  speech bubbles reacted to session activity.
+- **Third-party renderers**: drag plays running-left/right by direction
+  (zzp1221), right-click stats + token-fed XP/evolution (AgentPet),
+  hook-driven state on every tool call (petdex).
+
+## What Vivarium implements
+
+- **Cursor-look, actually working**: when idle, the pet's gaze follows the
+  pointer through all 16 look cells (22.5° steps, 000 = up), with the
+  contract's neutral deadzone falling back to the idle loop.
+- **Petting**: a press that does not move (<4px) is a pet, not a drag —
+  sprite pets play the waving row; the built-in egg hops and flares its
+  embers for ~1.2s.
+- **Drag**: directional — the pet plays running-left/right by drag direction
+  while following the cursor.
+- **State mapping** (aggregated across all sessions):
+  needs_you (waiting) > working (running) > done (wave one-shot) > idle >
+  asleep; SessionStart plays a jump. `failed` and `review` render but have no
+  session signal yet — when a failure feed exists it slots above `done` in
+  the priority queue, mirroring Codex's needs-input > blocked > ready order.
+
+## Not implemented (deliberately, for now)
+
+- Click-as-launcher (vivarium isn't bound to one app window).
+- Feeding/XP/evolution retention mechanics.
+- Sounds and speech bubbles (voice work is parked).
