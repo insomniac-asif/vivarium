@@ -3,18 +3,18 @@
 
 Instead of generating 73 frames with an image model (slow, quota-bound, and
 identity-drifty), this cuts the creature out of a single high-quality render
-and animates it with per-frame transforms: squash and stretch, lean, bob,
-lift, collapse, plus ember-glow grading. Every frame is the same pixels, so
-identity is exact by construction and the art tier is whatever the render is.
+and animates it: squash and stretch, a non-rigid BEND so the body follows
+through instead of pivoting like cardboard, arcing bobs, overshoot, and
+ember-glow grading. Every frame is the same pixels, so identity is exact by
+construction and the art tier is whatever the render is.
 
   python rig_from_render.py <render.png> --output-dir <frames-root> \
-      [--chroma 00ff00] [--anchor-height 168]
+      [--chroma-tol 60] [--anchor-height 168]
 
-Then compose/validate/contact-sheet as usual. Whole-body motion cannot fake a
-wing-raise or a true head turn: waving reads as a greeting bounce and the look
-rows as directional lean (legitimate body language for a chibi, and the v2
-deadzone keeps neutral on idle). For per-limb posing, generate those rows with
-a reference-capable model and drop them in over these.
+Then compose/validate/contact-sheet as usual. Whole-body motion cannot pose a
+limb: waving reads as a greeting bounce and the look rows as the body aiming
+its attention. For per-limb posing, generate those rows with a
+reference-capable model and drop them in over these.
 """
 import argparse
 import math
@@ -83,6 +83,24 @@ def knock_out(im, tol=60):
     return out.crop(box) if box else out
 
 
+# ------------------------------------------------------------ deformation ---
+def bend(img, amp, power=2.1):
+    """Non-rigid lean: displace each scanline horizontally, growing toward the
+    top. This is what keeps the creature from reading as a rotating cutout —
+    the base stays planted while the head and crest carry the motion."""
+    if abs(amp) < 0.4:
+        return img
+    w, h = img.size
+    pad = int(abs(amp)) + 2
+    out = Image.new("RGBA", (w + 2 * pad, h), (0, 0, 0, 0))
+    denom = max(1, h - 1)
+    for y in range(h):
+        t = (denom - y) / denom            # 0 at the base, 1 at the top
+        dx = amp * (t ** power)
+        out.alpha_composite(img.crop((0, y, w, y + 1)), (pad + int(round(dx)), y))
+    return out
+
+
 def ember(img, k):
     """Grade the ember glow: k<1 banks it, k>1 makes it blaze."""
     if abs(k - 1.0) < 0.02:
@@ -102,123 +120,131 @@ def ember(img, k):
     return out
 
 
-def pose(base, *, rot=0.0, sx=1.0, sy=1.0, dx=0, dy=0, glow=1.0, flip=False):
-    """Render one frame: transform the cutout into a 192x208 cell."""
+def pose(base, *, rot=0.0, lean=0.0, sx=1.0, sy=1.0, dx=0, dy=0, glow=1.0,
+         flip=False):
+    """One frame: squash, bend, tilt about the FEET, grade, place in the cell."""
     img = base
     if flip:
         img = img.transpose(Image.FLIP_LEFT_RIGHT)
     if abs(sx - 1) > 0.001 or abs(sy - 1) > 0.001:
         img = img.resize((max(1, round(img.width * sx)), max(1, round(img.height * sy))),
                          Image.LANCZOS)
+    if abs(lean) > 0.4:
+        img = bend(img, lean)
     if abs(rot) > 0.01:
-        img = img.rotate(rot, resample=Image.BICUBIC, expand=True)
+        # pivot at the base so a tilt reads as weight shifting, not spinning
+        img = img.rotate(rot, resample=Image.BICUBIC, expand=True,
+                         center=(img.width / 2, img.height - 1))
     img = ember(img, glow)
 
     cell = Image.new("RGBA", (CELL_W, CELL_H), (0, 0, 0, 0))
-    x = (CELL_W - img.width) // 2 + dx
-    y = CELL_H - BOTTOM_PAD - img.height + dy
-    cell.alpha_composite(img, (x, y))
+    cell.alpha_composite(img, ((CELL_W - img.width) // 2 + dx,
+                               CELL_H - BOTTOM_PAD - img.height + dy))
     return cell
 
 
 # ------------------------------------------------------------- choreography --
 def recipes():
-    """(state -> list of per-frame kwargs). Frame counts follow the v2 contract."""
+    """state -> per-frame kwargs. Frame counts follow the v2 contract.
+    Amplitudes are deliberately generous: at 192px, timid motion reads as a
+    still image. Bend carries most of the life; rotation is a seasoning."""
     r = {}
 
-    # idle: breathe + settle, embers banked
+    # idle — a slow breath with a drifting sway, embers banked low
     r["idle"] = [
-        dict(sy=1.000, dy=0, glow=0.90),
-        dict(sy=1.008, dy=-1, glow=0.94),
-        dict(sy=1.014, dy=-2, glow=0.99),
-        dict(sy=1.012, dy=-2, glow=1.00),
-        dict(sy=1.006, dy=-1, glow=0.95),
-        dict(sy=0.996, dy=0, sx=1.006, glow=0.90),
+        dict(sy=1.000, sx=1.000, dy=0, lean=1.5, glow=0.86),
+        dict(sy=1.014, sx=0.994, dy=-2, lean=4.0, glow=0.92),
+        dict(sy=1.026, sx=0.988, dy=-4, lean=5.5, glow=0.99),
+        dict(sy=1.022, sx=0.990, dy=-4, lean=2.0, glow=1.02),
+        dict(sy=1.010, sx=0.996, dy=-2, lean=-2.5, glow=0.94),
+        dict(sy=0.992, sx=1.010, dy=1, lean=-4.5, glow=0.86),
     ]
 
-    # running-right: bounding waddle — lean into travel, alternating hop
-    hop = [0, -5, -8, -5, 0, -4, -7, -3]
-    lean = [-4, -7, -9, -7, -4, -6, -8, -5]
+    # running-right — bounding hop; the body trails the leap, then whips forward
+    hop = [0, -7, -12, -8, -1, -6, -11, -4]
+    trail = [-5, -10, -4, 6, 9, -3, -9, -2]
     r["running-right"] = [
-        dict(rot=lean[i], dy=hop[i], dx=(i % 2) * 2 - 1,
-             sy=1.0 - hop[i] * 0.004, glow=1.05)
+        dict(lean=trail[i], rot=-3 - hop[i] * 0.15, dy=hop[i],
+             dx=(1 if i % 2 else -1) * 2,
+             sy=1.0 - hop[i] * 0.006, sx=1.0 + hop[i] * 0.004, glow=1.06)
         for i in range(8)
     ]
-    r["running-left"] = [dict(d, flip=True, rot=-d["rot"], dx=-d["dx"])
-                         for d in (dict(x) for x in r["running-right"])]
+    r["running-left"] = [dict(f, flip=True, rot=-f["rot"], lean=-f["lean"],
+                              dx=-f["dx"]) for f in map(dict, r["running-right"])]
 
-    # waving: greeting bounce — rock back, up, return, settle
+    # waving — rock back hard, overshoot forward, settle
     r["waving"] = [
-        dict(rot=-6, dy=-4, sy=1.02, glow=1.12),
-        dict(rot=-11, dy=-9, sy=1.04, glow=1.22),
-        dict(rot=-5, dy=-4, sy=1.02, glow=1.14),
-        dict(rot=0, dy=0, sy=1.00, glow=1.02),
+        dict(lean=-9, rot=-4, dy=-4, sy=1.03, sx=0.98, glow=1.12),
+        dict(lean=-19, rot=-8, dy=-12, sy=1.07, sx=0.95, glow=1.26),
+        dict(lean=7, rot=3, dy=-4, sy=1.00, sx=1.02, glow=1.14),
+        dict(lean=-2, rot=0, dy=0, sy=1.00, sx=1.00, glow=1.02),
     ]
 
-    # jumping: anticipation, launch, peak, descent, land
+    # jumping — deep anticipation, stretched launch, floating peak, land squash
     r["jumping"] = [
-        dict(sy=0.90, sx=1.08, dy=2, glow=1.0),
-        dict(sy=1.10, sx=0.94, dy=-14, glow=1.15),
-        dict(sy=1.06, sx=0.97, dy=-26, rot=-3, glow=1.25),
-        dict(sy=1.04, sx=0.98, dy=-12, rot=2, glow=1.10),
-        dict(sy=0.93, sx=1.06, dy=1, glow=0.98),
+        dict(sy=0.84, sx=1.15, dy=5, lean=2, glow=0.98),
+        dict(sy=1.17, sx=0.89, dy=-20, lean=-5, glow=1.18),
+        dict(sy=1.07, sx=0.96, dy=-36, lean=4, rot=-4, glow=1.30),
+        dict(sy=1.01, sx=1.00, dy=-15, lean=9, rot=5, glow=1.10),
+        dict(sy=0.87, sx=1.12, dy=3, lean=-4, glow=0.96),
     ]
 
-    # failed: slump, sink, flatten into a mound; embers die back to one point
+    # failed — slump sideways, buckle, flatten into a mound, embers dying
     r["failed"] = [
-        dict(rot=3, sy=0.97, dy=2, glow=0.85),
-        dict(rot=6, sy=0.92, sx=1.02, dy=5, glow=0.72),
-        dict(rot=9, sy=0.85, sx=1.05, dy=9, glow=0.60),
-        dict(rot=11, sy=0.76, sx=1.09, dy=13, glow=0.48),
-        dict(rot=12, sy=0.66, sx=1.13, dy=17, glow=0.38),
-        dict(rot=12, sy=0.58, sx=1.17, dy=20, glow=0.30),
-        dict(rot=12, sy=0.55, sx=1.19, dy=21, glow=0.34),
-        dict(rot=12, sy=0.55, sx=1.19, dy=21, glow=0.28),
+        dict(lean=4, rot=2, sy=0.96, sx=1.02, dy=3, glow=0.82),
+        dict(lean=9, rot=5, sy=0.90, sx=1.05, dy=7, glow=0.68),
+        dict(lean=14, rot=8, sy=0.82, sx=1.09, dy=12, glow=0.56),
+        dict(lean=18, rot=10, sy=0.72, sx=1.14, dy=17, glow=0.45),
+        dict(lean=20, rot=11, sy=0.62, sx=1.19, dy=21, glow=0.36),
+        dict(lean=21, rot=11, sy=0.54, sx=1.23, dy=24, glow=0.29),
+        dict(lean=21, rot=11, sy=0.52, sx=1.25, dy=25, glow=0.33),
+        dict(lean=21, rot=11, sy=0.52, sx=1.25, dy=25, glow=0.26),
     ]
 
-    # waiting: head-up plea, embers pulsing
+    # waiting — cranes up at you, embers pulsing like held breath
     r["waiting"] = [
-        dict(rot=-7, dy=-2, glow=1.00),
-        dict(rot=-10, dy=-4, glow=1.18),
-        dict(rot=-11, dy=-5, glow=1.26),
-        dict(rot=-10, dy=-4, glow=1.14),
-        dict(rot=-8, dy=-2, glow=1.00),
-        dict(rot=-6, dy=-1, glow=0.92),
+        dict(lean=-6, rot=-2, dy=-3, sy=1.02, glow=1.00),
+        dict(lean=-12, rot=-4, dy=-7, sy=1.05, glow=1.20),
+        dict(lean=-14, rot=-5, dy=-9, sy=1.06, glow=1.30),
+        dict(lean=-12, rot=-4, dy=-7, sy=1.05, glow=1.16),
+        dict(lean=-9, rot=-3, dy=-4, sy=1.03, glow=1.00),
+        dict(lean=-6, rot=-2, dy=-2, sy=1.01, glow=0.90),
     ]
 
-    # running (work): hunch forward, fast bob, embers at full blaze
+    # running (work) — hunched into the task, fast bob, embers at full blaze
     r["running"] = [
-        dict(rot=7, dy=0, sy=0.99, glow=1.30),
-        dict(rot=9, dy=-3, sy=1.01, glow=1.40),
-        dict(rot=8, dy=-1, sy=1.00, glow=1.34),
-        dict(rot=10, dy=-4, sy=1.02, glow=1.44),
-        dict(rot=8, dy=-1, sy=0.99, glow=1.32),
-        dict(rot=7, dy=0, sy=0.98, glow=1.26),
+        dict(lean=9, rot=3, dy=0, sy=0.98, sx=1.02, glow=1.30),
+        dict(lean=13, rot=4, dy=-5, sy=1.02, sx=0.99, glow=1.42),
+        dict(lean=10, rot=3, dy=-1, sy=0.99, sx=1.01, glow=1.34),
+        dict(lean=15, rot=5, dy=-6, sy=1.03, sx=0.98, glow=1.46),
+        dict(lean=11, rot=3, dy=-2, sy=0.99, sx=1.01, glow=1.32),
+        dict(lean=8, rot=2, dy=0, sy=0.97, sx=1.02, glow=1.24),
     ]
 
-    # review: bow over the work, small considering tilts
+    # review — bows over the finished work, small considering shifts
     r["review"] = [
-        dict(rot=10, dy=3, sy=0.98, glow=1.02),
-        dict(rot=13, dy=4, sy=0.97, glow=1.06),
-        dict(rot=11, dy=3, sy=0.98, glow=1.02),
-        dict(rot=14, dy=5, sy=0.96, glow=1.08),
-        dict(rot=12, dy=4, sy=0.97, glow=1.04),
-        dict(rot=10, dy=3, sy=0.98, glow=1.00),
+        dict(lean=12, rot=4, dy=4, sy=0.97, sx=1.02, glow=1.00),
+        dict(lean=17, rot=6, dy=6, sy=0.95, sx=1.04, glow=1.06),
+        dict(lean=13, rot=4, dy=4, sy=0.97, sx=1.02, glow=1.00),
+        dict(lean=19, rot=6, dy=7, sy=0.94, sx=1.05, glow=1.08),
+        dict(lean=15, rot=5, dy=5, sy=0.96, sx=1.03, glow=1.02),
+        dict(lean=11, rot=3, dy=3, sy=0.98, sx=1.01, glow=0.98),
     ]
     return r
 
 
 def look_recipe(deg):
-    """Directional attention: lean toward the target, lift for up, bow for down.
-    000 = up, clockwise. Whole-body body language, not a fake head rotation."""
+    """Attention aimed by the BODY: the base stays planted, the head and crest
+    lean toward the target. 000 = up, clockwise."""
     th = math.radians(deg)
-    lean = math.sin(th) * 11.0          # +right / -left
-    pitch = math.cos(th)                # +up / -down
-    return dict(rot=lean,
-                dy=round(-pitch * 5),
-                sy=1.0 + pitch * 0.015,
-                sx=1.0 - abs(math.sin(th)) * 0.02,
-                glow=1.0 + pitch * 0.05)
+    horiz = math.sin(th)
+    vert = math.cos(th)
+    return dict(lean=horiz * 15.0,
+                rot=horiz * 3.0,
+                dy=round(-vert * 6),
+                sy=1.0 + vert * 0.030,
+                sx=1.0 - abs(horiz) * 0.025,
+                glow=1.0 + vert * 0.06)
 
 
 def main():
@@ -230,7 +256,7 @@ def main():
     args = ap.parse_args()
 
     cut = knock_out(Image.open(args.render), args.chroma_tol)
-    k = min(args.anchor_height / cut.height, (CELL_W - 20) / cut.width)
+    k = min(args.anchor_height / cut.height, (CELL_W - 26) / cut.width)
     cut = cut.resize((max(1, round(cut.width * k)), max(1, round(cut.height * k))),
                      Image.LANCZOS)
     print(f"cutout {cut.size} (scaled x{k:.3f})")
