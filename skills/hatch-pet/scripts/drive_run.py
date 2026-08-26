@@ -25,6 +25,7 @@ import json
 import os
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 
 SCRIPTS = os.path.dirname(os.path.abspath(__file__))
@@ -55,18 +56,34 @@ def gen_gemini(prompt, ref_paths, out_path, job=None):
     key = os.environ.get("GEMINI_API_KEY") or os.environ.get("ABL_GEMINI_KEY")
     if not key:
         raise SystemExit("GEMINI_API_KEY (or ABL_GEMINI_KEY) is not set")
+    job = job or {}
+    prompt = job.get("sd_prompt") or prompt
     parts = [{"text": prompt}]
     for rp in ref_paths:
         with open(rp, "rb") as f:
             parts.append({"inline_data": {"mime_type": "image/png",
                                           "data": base64.b64encode(f.read()).decode()}})
-    body = json.dumps({"contents": [{"parts": parts}]}).encode()
+    gen_cfg = {"responseModalities": ["IMAGE", "TEXT"]}
+    if job.get("kind") != "base":
+        gen_cfg["imageConfig"] = {"aspectRatio": "16:9"}  # wide row strips
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
            f"{GEMINI_MODEL}:generateContent?key={key}")
-    req = urllib.request.Request(url, data=body,
-                                 headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=180) as r:
-        resp = json.load(r)
+
+    def _post(cfg):
+        body = json.dumps({"contents": [{"parts": parts}],
+                           "generationConfig": cfg}).encode()
+        req = urllib.request.Request(url, data=body,
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=300) as r:
+            return json.load(r)
+
+    try:
+        resp = _post(gen_cfg)
+    except urllib.error.HTTPError as e:
+        if e.code == 400 and "imageConfig" in gen_cfg:
+            resp = _post({"responseModalities": ["IMAGE", "TEXT"]})
+        else:
+            raise
     for cand in resp.get("candidates", []):
         for part in cand.get("content", {}).get("parts", []):
             blob = part.get("inline_data") or part.get("inlineData")
