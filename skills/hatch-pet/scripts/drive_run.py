@@ -37,11 +37,12 @@ def gen_abl(prompt, ref_paths, out_path, job=None):
     job = job or {}
     prompt = job.get("sd_prompt") or prompt
     size = job.get("size") or ("1024x1024" if job.get("kind") == "base" else "1536x640")
+    quality = "high" if job.get("kind") == "base" else "auto"
     body = json.dumps({"prompt": prompt, "n": 1, "size": size,
-                       "quality": "high", "response_format": "b64_json"}).encode()
+                       "quality": quality, "response_format": "b64_json"}).encode()
     req = urllib.request.Request(url + "/v1/images/generations", data=body,
                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=900) as r:
+    with urllib.request.urlopen(req, timeout=2400) as r:
         resp = json.load(r)
     if "error" in resp:
         raise RuntimeError(f"diffusion server: {resp['error']}")
@@ -90,6 +91,22 @@ def gen_flux(prompt, ref_paths, out_path, job=None):
 BACKENDS = {"gemini": gen_gemini, "abl": gen_abl, "flux": gen_flux}
 
 
+def detect_chroma(image_path, fallback):
+    """Diffusion models rarely hit the exact requested key color — sample the
+    strip's corners and use their median as the actual chroma key."""
+    try:
+        from PIL import Image
+        im = Image.open(image_path).convert("RGB")
+        w, h = im.size
+        pts = [im.getpixel(p) for p in
+               [(2, 2), (w - 3, 2), (2, h - 3), (w - 3, h - 3),
+                (w // 2, 2), (w // 2, h - 3)]]
+        med = tuple(sorted(c[i] for c in pts)[len(pts) // 2] for i in range(3))
+        return "%02x%02x%02x" % med
+    except Exception:
+        return fallback
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run-dir", required=True)
@@ -129,7 +146,7 @@ def main():
                 rc = subprocess.call([sys.executable,
                                       os.path.join(SCRIPTS, "extract_row_strip.py"),
                                       out, "--expected-frames", str(j["frames"]),
-                                      "--chroma-key", chroma,
+                                      "--chroma-key", detect_chroma(out, chroma),
                                       "--output-dir", cells, "--json-out", report])
                 if rc != 0:
                     print(f"[{j['id']}] extraction FAILED - inspect {report}; "

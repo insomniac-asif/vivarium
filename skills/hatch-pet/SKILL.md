@@ -80,6 +80,35 @@ row strips / an existing atlas instead.
    The overlay's pet picker (right-click) lists it immediately. The same
    package dropped into `~/.codex/pets/` works in Codex CLI.
 
+## Harvest-and-curate (recommended for local SDXL-class models)
+
+Prompt-only SDXL will NOT reliably produce exact N-pose strips — it draws
+dense multi-row model sheets, and some generations are degenerate. The path
+that actually works on a local 8GB GPU:
+
+1. Generate 10-15 sheets with varied state prompts (the exact layout doesn't
+   matter — you want a large diverse pose library). Fewer, larger poses per
+   sheet ("four large poses in a row") come out cleaner than many small ones.
+2. `harvest_poses.py` — slices every sheet into per-pose crops via
+   background-color detection + connected components, and renders labeled
+   contact grids.
+3. Vision-classify every crop (quality / identity / facing / head direction /
+   pose type) — read the grids yourself or fan out to vision agents.
+4. Generate small targeted gap sheets for whatever the library lacks (looking
+   straight up, a collapse-to-ash arc, a wave) and re-harvest.
+5. Write an assignment mapping each of the 73 atlas slots to a crop id (with
+   optional `"mirror": true` and per-slot `"h"` target height — source sheets
+   draw the character at wildly different scales, so per-slot normalization
+   is essential). Keep facing coherent within each row; mirror one run
+   direction from the other.
+6. `curate_atlas.py assignment.json` — background-knockout (border flood),
+   despill, per-slot scale, bottom-center baseline into 192x208 cells.
+7. Compose, validate, contact-sheet, previews as below. Review visually,
+   swap weak crops, recut — iteration is cheap after generation.
+
+`extract_row_strip.py` remains the right tool when a model CAN follow strip
+layouts (reference-conditioned models like Gemini image or FLUX Kontext).
+
 ## Repairs and imports
 
 - Existing v2 atlas: run `validate_atlas.py`; regenerate only failing rows
