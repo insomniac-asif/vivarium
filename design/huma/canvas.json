@@ -1,0 +1,11 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 640, "h": 640 },
+    { "file": "Poses.dc.html", "x": 740, "y": 0, "w": 1080, "h": 780, "title": "State poses" },
+    { "file": "LookRing.dc.html", "x": 0, "y": 920, "w": 1080, "h": 420, "title": "Look directions" }
+  ],
+  "annotations": [
+    { "id": "identity-note", "x": 0, "y": -150, "w": 560, "text": "Huma - vector rig for the vivarium sprite atlas.\nIdentity canon: plump soot-black bird, red ember flame-crest, crack-veins on chest, eyes hotter than the veins, black talons. Not cute.\nEdit anything - shapes, colors, the ember tweak on the hero. When it looks right, the rig rasterizes into all 73 atlas frames." }
+  ],
+  "launch": { "view": "canvas" }
+}

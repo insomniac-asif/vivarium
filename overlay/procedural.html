@@ -67,6 +67,7 @@ var lastT = null;
 var wiggleT = -1;           // done-entry settle-wiggle clock
 var hopT = -1;              // needs_you hop clock
 var nextHop = 2500;
+var petFlare = 0;           // ms of ember flare after being petted
 
 // ember veins in body-local coords (y up = negative), clipped to the body
 var VEINS = [
@@ -106,6 +107,7 @@ function frame(tms) {
   }
   if (hopT >= 0) hopT += dt;
   if (hopT > 420) hopT = -1;
+  if (petFlare > 0) petFlare = Math.max(0, petFlare - dt);
 
   draw(t);
 }
@@ -114,7 +116,7 @@ function draw(t) {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.clearRect(0, 0, W, H);
 
-  var ign = P.ign.v;
+  var ign = Math.min(1, P.ign.v + 0.55 * (petFlare / 1200));
   var overburn = (typeof state.ctxPct === 'number' && state.ctxPct > 85)
     ? (state.ctxPct - 85) / 15 : 0;
   var dayBank = state.nightGlow ? 0 : 0.55; // grey in daylight
@@ -238,6 +240,7 @@ window.juna = { // bridge.js looks for window.vivarium || window.juna
     ['ctxPct', 'drowsy', 'sessions', 'nightGlow'].forEach(function (kk) {
       if (kk in s && s[kk] !== undefined) state[kk] = s[kk];
     });
+    if (s.event === 'Petted') { hopT = 0; petFlare = 1200; }
     if (s.mood && s.mood !== lastMood) {
       if (s.mood === 'done') wiggleT = 0;
       lastMood = s.mood;

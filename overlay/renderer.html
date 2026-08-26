@@ -193,6 +193,7 @@ window.vivarium = {
     if (typeof s.dragging === 'boolean') state.dragging = s.dragging;
     if (typeof s.dragDir === 'number' && s.dragDir !== 0) state.dragDir = s.dragDir;
     if (s.event === 'SessionStart') playOneshot('jumping');
+    if (s.event === 'Petted') playOneshot('waving');
     if (s.mood && s.mood !== lastMood) {
       if (s.mood === 'done') playOneshot('waving');
       lastMood = s.mood;

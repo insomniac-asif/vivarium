@@ -207,6 +207,9 @@ function createWindow() {
 }
 
 // ---- drag (main follows cursor; reports direction for run animation) ------
+let dragStartPos = null;
+let dragMoved = 0;
+
 ipcMain.on('drag-start', () => {
   if (dragTimer || !win) return;
   dragging = true;
@@ -215,6 +218,8 @@ ipcMain.on('drag-start', () => {
   const ox = start.x - wx;
   const oy = start.y - wy;
   lastCursor = start;
+  dragStartPos = start;
+  dragMoved = 0;
   win.webContents.send('juna-state', { dragging: true });
   dragTimer = setInterval(() => {
     if (!win || win.isDestroyed()) return;
@@ -222,6 +227,7 @@ ipcMain.on('drag-start', () => {
     win.setPosition(c.x - ox, c.y - oy);
     const dx = c.x - lastCursor.x;
     if (Math.abs(dx) > 2) win.webContents.send('juna-state', { dragging: true, dragDir: Math.sign(dx) });
+    dragMoved = Math.max(dragMoved, Math.hypot(c.x - dragStartPos.x, c.y - dragStartPos.y));
     lastCursor = c;
   }, 16);
 });
@@ -231,7 +237,9 @@ ipcMain.on('drag-end', () => {
   if (win && !win.isDestroyed()) {
     const [x, y] = win.getPosition();
     saveConfig({ x, y });
-    win.webContents.send('juna-state', { dragging: false });
+    // a press that never moved is a pet, not a drag
+    const petted = dragMoved < 4;
+    win.webContents.send('juna-state', petted ? { dragging: false, event: 'Petted' } : { dragging: false });
   }
 });
 

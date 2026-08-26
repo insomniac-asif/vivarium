@@ -1,0 +1,127 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: "Space Grotesk", system-ui, sans-serif; }
+    a { color: #ff2b33; } a:hover { color: #ff5a4a; }
+    .lbl { color: #6a6a6e; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; }
+  </style>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&amp;display=swap">
+</helmet>
+<div style="width: 1080px; height: 420px; background: #0e0e12; padding: 24px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px">
+  <div class="lbl" style="color: #9a9aa2">Look directions - head aims (bird mechanics: head leads, body planted). 8 keys shown; the rig interpolates the 16 atlas cells.</div>
+  <div style="display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 10px">
+
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 4px">
+      <svg viewBox="0 0 120 120" width="118" height="118" xmlns="http://www.w3.org/2000/svg">
+        <ellipse cx="60" cy="86" rx="34" ry="26" fill="#1f1f24"></ellipse>
+        <g transform="rotate(-88 60 66)">
+          <circle cx="82" cy="60" r="17" fill="#1f1f24"></circle>
+          <circle cx="88" cy="56" r="3.4" fill="#ff2b33"></circle><circle cx="88.8" cy="55.2" r="1.3" fill="#ffe9dd"></circle>
+          <path d="M 97 56 L 110 61 L 96 66 C 98 63 98 59 97 56 Z" fill="#0e0e10"></path>
+        </g>
+        <path d="M 40 60 C 34 50 32 40 36 32 C 44 38 48 48 48 58" fill="#8b1a1e" opacity="0.8"></path>
+      </svg>
+      <div class="lbl">000 up</div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 4px">
+      <svg viewBox="0 0 120 120" width="118" height="118" xmlns="http://www.w3.org/2000/svg">
+        <ellipse cx="60" cy="86" rx="34" ry="26" fill="#1f1f24"></ellipse>
+        <g transform="rotate(-44 60 66)">
+          <circle cx="82" cy="60" r="17" fill="#1f1f24"></circle>
+          <circle cx="88" cy="56" r="3.4" fill="#ff2b33"></circle><circle cx="88.8" cy="55.2" r="1.3" fill="#ffe9dd"></circle>
+          <path d="M 97 56 L 110 61 L 96 66 C 98 63 98 59 97 56 Z" fill="#0e0e10"></path>
+        </g>
+        <path d="M 42 58 C 36 48 34 38 38 30 C 46 36 50 46 50 56" fill="#8b1a1e" opacity="0.8"></path>
+      </svg>
+      <div class="lbl">045</div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 4px">
+      <svg viewBox="0 0 120 120" width="118" height="118" xmlns="http://www.w3.org/2000/svg">
+        <ellipse cx="60" cy="86" rx="34" ry="26" fill="#1f1f24"></ellipse>
+        <circle cx="82" cy="60" r="17" fill="#1f1f24"></circle>
+        <circle cx="88" cy="56" r="3.4" fill="#ff2b33"></circle><circle cx="88.8" cy="55.2" r="1.3" fill="#ffe9dd"></circle>
+        <path d="M 97 56 L 112 62 L 96 68 C 98 64 98 59 97 56 Z" fill="#0e0e10"></path>
+        <path d="M 44 56 C 38 46 36 36 40 28 C 48 34 52 44 52 54" fill="#8b1a1e" opacity="0.8"></path>
+      </svg>
+      <div class="lbl">090 right</div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 4px">
+      <svg viewBox="0 0 120 120" width="118" height="118" xmlns="http://www.w3.org/2000/svg">
+        <ellipse cx="60" cy="86" rx="34" ry="26" fill="#1f1f24"></ellipse>
+        <g transform="rotate(38 60 66)">
+          <circle cx="82" cy="60" r="17" fill="#1f1f24"></circle>
+          <circle cx="88" cy="56" r="3.4" fill="#ff2b33"></circle><circle cx="88.8" cy="55.2" r="1.3" fill="#ffe9dd"></circle>
+          <path d="M 97 56 L 110 61 L 96 66 C 98 63 98 59 97 56 Z" fill="#0e0e10"></path>
+        </g>
+        <path d="M 42 58 C 36 48 34 38 38 30 C 46 36 50 46 50 56" fill="#8b1a1e" opacity="0.8"></path>
+      </svg>
+      <div class="lbl">135</div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 4px">
+      <svg viewBox="0 0 120 120" width="118" height="118" xmlns="http://www.w3.org/2000/svg">
+        <ellipse cx="60" cy="86" rx="34" ry="26" fill="#1f1f24"></ellipse>
+        <g transform="rotate(78 58 70)">
+          <circle cx="80" cy="62" r="17" fill="#1f1f24"></circle>
+          <circle cx="86" cy="58" r="3.4" fill="#ff2b33"></circle><circle cx="86.8" cy="57.2" r="1.3" fill="#ffe9dd"></circle>
+          <path d="M 95 58 L 108 63 L 94 68 C 96 65 96 61 95 58 Z" fill="#0e0e10"></path>
+        </g>
+        <path d="M 44 54 C 38 44 36 34 40 26 C 48 32 52 42 52 52" fill="#8b1a1e" opacity="0.8"></path>
+      </svg>
+      <div class="lbl">180 down</div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 4px">
+      <svg viewBox="0 0 120 120" width="118" height="118" xmlns="http://www.w3.org/2000/svg">
+        <ellipse cx="60" cy="86" rx="34" ry="26" fill="#1f1f24"></ellipse>
+        <g transform="scale(-1 1) translate(-120 0) rotate(38 60 66)">
+          <circle cx="82" cy="60" r="17" fill="#1f1f24"></circle>
+          <circle cx="88" cy="56" r="3.4" fill="#ff2b33"></circle><circle cx="88.8" cy="55.2" r="1.3" fill="#ffe9dd"></circle>
+          <path d="M 97 56 L 110 61 L 96 66 C 98 63 98 59 97 56 Z" fill="#0e0e10"></path>
+        </g>
+        <path d="M 78 58 C 84 48 86 38 82 30 C 74 36 70 46 70 56" fill="#8b1a1e" opacity="0.8"></path>
+      </svg>
+      <div class="lbl">225</div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 4px">
+      <svg viewBox="0 0 120 120" width="118" height="118" xmlns="http://www.w3.org/2000/svg">
+        <ellipse cx="60" cy="86" rx="34" ry="26" fill="#1f1f24"></ellipse>
+        <g transform="scale(-1 1) translate(-120 0)">
+          <circle cx="82" cy="60" r="17" fill="#1f1f24"></circle>
+          <circle cx="88" cy="56" r="3.4" fill="#ff2b33"></circle><circle cx="88.8" cy="55.2" r="1.3" fill="#ffe9dd"></circle>
+          <path d="M 97 56 L 112 62 L 96 68 C 98 64 98 59 97 56 Z" fill="#0e0e10"></path>
+        </g>
+        <path d="M 76 56 C 82 46 84 36 80 28 C 72 34 68 44 68 54" fill="#8b1a1e" opacity="0.8"></path>
+      </svg>
+      <div class="lbl">270 left</div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 4px">
+      <svg viewBox="0 0 120 120" width="118" height="118" xmlns="http://www.w3.org/2000/svg">
+        <ellipse cx="60" cy="86" rx="34" ry="26" fill="#1f1f24"></ellipse>
+        <g transform="scale(-1 1) translate(-120 0) rotate(-44 60 66)">
+          <circle cx="82" cy="60" r="17" fill="#1f1f24"></circle>
+          <circle cx="88" cy="56" r="3.4" fill="#ff2b33"></circle><circle cx="88.8" cy="55.2" r="1.3" fill="#ffe9dd"></circle>
+          <path d="M 97 56 L 110 61 L 96 66 C 98 63 98 59 97 56 Z" fill="#0e0e10"></path>
+        </g>
+        <path d="M 78 58 C 84 48 86 38 82 30 C 74 36 70 46 70 56" fill="#8b1a1e" opacity="0.8"></path>
+      </svg>
+      <div class="lbl">315</div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
