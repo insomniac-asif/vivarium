@@ -51,7 +51,7 @@ function defaultPosition() {
 
 // ---- pet discovery --------------------------------------------------------
 function discoverPets() {
-  const pets = [{ id: 'juna', name: 'Juna (built-in)', kind: 'procedural', dir: null, source: 'builtin' }];
+  const pets = [{ id: 'huma', name: 'Huma (built-in)', kind: 'procedural', dir: null, source: 'builtin' }];
   for (const { root, source } of PET_ROOTS) {
     let entries;
     try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { continue; }

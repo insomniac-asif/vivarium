@@ -2,411 +2,334 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>juna-a</title>
+<title>huma</title>
 <style>
-  html,body{margin:0;background:transparent;overflow:hidden}
-  canvas{display:block}
+  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+  body.debug { background: #0e0e12; }
+  #stage { display: block; }
+  #caption { position: fixed; left: 6px; top: 4px; color: #666; font: 11px monospace; display: none; }
+  body.debug #caption { display: block; }
 </style>
 </head>
 <body>
-<canvas id="c"></canvas>
+<canvas id="stage"></canvas>
+<div id="caption"></div>
 <script>
-(function(){
 'use strict';
-/* ============================================================
-   Juna — variant A: front-facing chibi axolotl
-   Design space: 220 x 210. Layout sketch:
-     head    ellipse  c=(110, 96)  rx=54 ry=47   (~65% of mass)
-     body    ellipse  c=(110,158)  rx=37 ry=36   (sits to y=194)
-     belly   ellipse  c=(110,166)  rx=22 ry=19   (scales w/ ctxPct)
-     eyes    (110±23, hy-5) r≈8
-     gills   3 stalks/side, bases just inside head rim at angles
-             -0.95 / -0.12 / +0.62 rad (mirrored), quad-bezier stems
-             with 6 barb pairs each -> feathered silhouette
-     tail    tapered quad-bezier ribbon curling around the right
-     ground  pivot (110,192); soft shadow at y=196; dots at y=204
-   ============================================================ */
-var DBG = location.search.indexOf('debug') >= 0;
-var cv = document.getElementById('c'), ctx = cv.getContext('2d');
-var W = 220, H = 210, fit = 1, ox = 0, oy = 0, DPR = 1;
+// ---------------------------------------------------------------------------
+// Huma — procedural built-in pet for Vivarium.
+// An ash-phoenix chick, permanently pre-rebirth: soot-black coal body,
+// signal-red ember veins that ignite while Claude works, eyes small but
+// hotter than the veins. Fails to an ash pile with one live ember (sprite row
+// only), overburns past 85% context, burns bright at night and grey by day.
+// ---------------------------------------------------------------------------
+var W = 200, H = 224;
+var canvas = document.getElementById('stage');
+var ctx = canvas.getContext('2d');
+var DPR = 1;
 
-function resize(){
-  DPR = Math.max(1, window.devicePixelRatio || 1);
-  W = Math.max(60, window.innerWidth  || 220);
-  H = Math.max(60, window.innerHeight || 210);
-  cv.width  = Math.round(W * DPR);
-  cv.height = Math.round(H * DPR);
-  cv.style.width  = W + 'px';
-  cv.style.height = H + 'px';
-  fit = Math.min(W / 220, H / 210);
-  ox = (W - 220 * fit) / 2;
-  oy = (H - 210 * fit) / 2;
-  grads();
+function fit() {
+  DPR = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
 }
-window.addEventListener('resize', resize);
+fit();
+window.addEventListener('resize', fit);
 
-function clamp(v, a, b){ return v < a ? a : v > b ? b : v; }
-function lerp(a, b, t){ return a + (b - a) * t; }
+// palette — soot charcoals, one red accent, white-hot only inside eyes/veins
+var SOOT_HI = '#2b2b32', SOOT = '#1f1f24', SOOT_LO = '#141418';
+var EMBER = [255, 43, 51];       // #ff2b33
+var EMBER_DIM = [139, 26, 30];   // #8b1a1e
+var DAY_GREY = [106, 106, 110];  // veins bank to grey in daylight
+var HOT_CORE = [255, 233, 221];  // white-hot (eye cores, overburn)
 
-/* palette */
-var GD = [139, 26, 30], GB = [255, 43, 51];       /* dim / bright gill red */
-function gillCol(t, mul){
-  var r = Math.round(lerp(GD[0], GB[0], t) * mul),
-      g = Math.round(lerp(GD[1], GB[1], t) * mul),
-      b = Math.round(lerp(GD[2], GB[2], t) * mul);
-  return 'rgb(' + r + ',' + g + ',' + b + ')';
-}
+var state = { mood: 'idle', ctxPct: null, drowsy: false, sessions: 0, nightGlow: true };
+var lastMood = 'idle';
 
-var headG = null, bodyG = null, shG = null;
-function grads(){
-  headG = ctx.createRadialGradient(92, 76, 8, 112, 100, 88);
-  headG.addColorStop(0, '#2f2f36');
-  headG.addColorStop(0.55, '#1f1f24');
-  headG.addColorStop(1, '#141418');
-  bodyG = ctx.createRadialGradient(98, 142, 6, 112, 162, 72);
-  bodyG.addColorStop(0, '#2a2a31');
-  bodyG.addColorStop(0.6, '#1f1f24');
-  bodyG.addColorStop(1, '#141418');
-  shG = ctx.createRadialGradient(110, 196, 2, 110, 196, 48);
-  shG.addColorStop(0, 'rgba(0,0,0,0.28)');
-  shG.addColorStop(1, 'rgba(0,0,0,0)');
-}
-
-/* ---------- state + eased parameters ---------- */
-var st = { mood: 'idle', ctxPct: null, drowsy: false, sessions: 0, nightGlow: false };
-
-/* per-mood targets:
-   eo eye-open  es eye-scale  px/py pupil offset  gs gill speed  ga gill amp
-   sm smile  wk work-bob  fl float  sl sleep-settle  ex expectant  pu gill pulse
-   br breath rate (Hz) */
-var MT = {
-  working:   { eo:1,    es:1.14, px:0,   py:-0.5, gs:3.3,  ga:1.6,  sm:0.45, wk:1, fl:0,    sl:0, ex:0, pu:0, br:0.5  },
-  needs_you: { eo:1,    es:1.06, px:2.4, py:-3.2, gs:2.3,  ga:1.25, sm:0.55, wk:0, fl:0.25, sl:0, ex:1, pu:1, br:0.48 },
-  done:      { eo:0.42, es:1,    px:0,   py:0.6,  gs:1.5,  ga:1,    sm:1,    wk:0, fl:0.35, sl:0, ex:0, pu:0, br:0.38 },
-  idle:      { eo:0.92, es:1,    px:0,   py:0,    gs:1.35, ga:1,    sm:0.3,  wk:0, fl:1,    sl:0, ex:0, pu:0, br:0.36 },
-  asleep:    { eo:0,    es:1,    px:0,   py:0,    gs:0.55, ga:0.55, sm:0.18, wk:0, fl:0,    sl:1, ex:0, pu:0, br:0.15 }
+// eased params: {value, target}
+var P = {
+  ign:   { v: 0.28, t: 0.28 }, // ember ignition 0..1
+  hunch: { v: 0, t: 0 },       // forward work-hunch px
+  headUp:{ v: 0, t: 0 },       // needs_you tilt-back
+  sink:  { v: 0, t: 0 },       // asleep settle px
+  lid:   { v: 0, t: 0 },       // eyelid closure 0..1
+  wing:  { v: 0, t: 0 },       // wing lift (wave/flap) 0..1
 };
-var P = { eo:0.92, es:1, px:0, py:0, gs:1.35, ga:1, sm:0.3, wk:0, fl:1, sl:0, ex:0, pu:0, br:0.36,
-          glow:0, belly:0, bh:0 };
-var RATE = { eo:7, es:5, px:5, py:5, gs:3, ga:3, sm:4, wk:3, fl:2.5, sl:2.2, ex:4, pu:3, br:2,
-             glow:2.5, belly:1.5, bh:2 };
-
-var t0 = performance.now() / 1000;
-function tnow(){ return performance.now() / 1000 - t0; }
-
-var wiggleAt = -9, hopStart = -9, nextHop = 1e9, blinkStart = -9, nextBlink = 2.5;
-
-window.juna = {
-  setState: function(s){
-    if (!s) return;
-    var m = (s.mood in MT) ? s.mood : st.mood;
-    if (m !== st.mood){
-      if (m === 'done')      wiggleAt = tnow();
-      if (m === 'needs_you') nextHop  = tnow() + 0.8 + Math.random();
-    }
-    st.mood      = m;
-    st.ctxPct    = (typeof s.ctxPct === 'number' && isFinite(s.ctxPct)) ? clamp(s.ctxPct, 0, 100) : null;
-    st.drowsy    = !!s.drowsy;
-    st.sessions  = Math.max(0, s.sessions | 0);
-    st.nightGlow = !!s.nightGlow;
-  }
+var TARGETS = {
+  working:   { ign: 1.0,  hunch: 4, headUp: 0, sink: 0, lid: 0 },
+  needs_you: { ign: 0.72, hunch: 0, headUp: 1, sink: 0, lid: 0 },
+  done:      { ign: 0.5,  hunch: 0, headUp: 0, sink: 0, lid: 0.35 },
+  idle:      { ign: 0.28, hunch: 0, headUp: 0, sink: 0, lid: 0 },
+  asleep:    { ign: 0.07, hunch: 0, headUp: 0, sink: 7, lid: 1 },
 };
 
-/* ---------- geometry helpers ---------- */
-function qp(u, a, b, c){ var v = 1 - u; return v * v * a + 2 * v * u * b + u * u * c; }
-function qd(u, a, b, c){ return 2 * (1 - u) * (b - a) + 2 * u * (c - b); }
+var lastT = null;
+var blinkAt = 4000 + Math.random() * 3000;
+var blink = 0;              // 0..1 closure from blinking
+var wiggleT = -1;           // done-entry wiggle clock
+var hopT = -1;              // needs_you hop clock
+var nextHop = 2500;
 
-/* ---------- drawing ---------- */
-function drawShadow(lift){
-  var k = 1 + Math.min(lift, 0) * 0.01;      /* airborne -> smaller shadow */
-  ctx.save();
-  ctx.translate(110, 196);
-  ctx.scale(k, k * 0.16);
-  ctx.translate(-110, -196);
-  ctx.fillStyle = shG;
-  ctx.beginPath(); ctx.arc(110, 196, 48, 0, 6.2832); ctx.fill();
-  ctx.restore();
-}
-
-function drawTail(tp){
-  var p0x = 124, p0y = 162,
-      c1x = 170 + Math.sin(tp) * 4,       c1y = 172,
-      p2x = 148 + Math.sin(tp + 0.7) * 5, p2y = 190;
-  var n = 14, up = [], dn = [], i, u, x, y, dx, dy, dl, nx, ny, w;
-  for (i = 0; i <= n; i++){
-    u  = i / n;
-    x  = qp(u, p0x, c1x, p2x); y  = qp(u, p0y, c1y, p2y);
-    dx = qd(u, p0x, c1x, p2x); dy = qd(u, p0y, c1y, p2y);
-    dl = Math.hypot(dx, dy) || 1;
-    nx = -dy / dl; ny = dx / dl;
-    w  = 8.5 * (1 - u) + 1.3;
-    up.push([x + nx * w, y + ny * w]);
-    dn.push([x - nx * w, y - ny * w]);
-  }
-  ctx.fillStyle = '#1d1d22';
-  ctx.beginPath();
-  ctx.moveTo(up[0][0], up[0][1]);
-  for (i = 1; i <= n; i++) ctx.lineTo(up[i][0], up[i][1]);
-  for (i = n; i >= 0; i--) ctx.lineTo(dn[i][0], dn[i][1]);
-  ctx.closePath(); ctx.fill();
-  /* soft fin ridge along the upper edge */
-  ctx.strokeStyle = '#2a2a31'; ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(dn[1][0], dn[1][1]);
-  for (i = 2; i <= n - 1; i++) ctx.lineTo(dn[i][0], dn[i][1]);
-  ctx.stroke();
-}
-
-/* right-side stalk defs; left is mirrored */
-var STALKS = [
-  { a: -0.95, l: 26, f: 0.85, ph: 0   },
-  { a: -0.12, l: 33, f: 1.0,  ph: 1.3 },
-  { a:  0.62, l: 26, f: 0.85, ph: 2.5 }
+// ember veins in body-local coords (y up = negative), clipped to the body
+var VEINS = [
+  [[-34, 6], [-16, -6], [-4, -22], [6, -38]],
+  [[-26, 28], [-8, 18], [10, 10], [26, -2]],
+  [[36, 12], [22, 2], [14, -14], [2, -26]],
+  [[-38, -8], [-24, -16], [-12, -30]],
+  [[8, 34], [18, 24], [32, 20]],
+  [[-6, 40], [2, 28], [-2, 14]],
 ];
 
-function stalk(bx, by, cx, cy, tx, ty, f, main, dark, wm){
-  function barbs(scale){
-    ctx.beginPath();
-    for (var k = 0; k < 6; k++){
-      var u  = 0.2 + k * 0.14;
-      var x  = qp(u, bx, cx, tx), y  = qp(u, by, cy, ty);
-      var dx = qd(u, bx, cx, tx), dy = qd(u, by, cy, ty);
-      var dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;
-      var bl = f * 8.2 * (1.05 - u * 0.75) * scale;
-      for (var sg = -1; sg <= 1; sg += 2){
-        var ca = Math.cos(1.19 * sg), sa = Math.sin(1.19 * sg);
-        var rx = dx * ca - dy * sa,   ry = dx * sa + dy * ca;
-        var cb = Math.cos(0.75 * sg), sb = Math.sin(0.75 * sg);
-        var mx = dx * cb - dy * sb,   my = dx * sb + dy * cb;
-        ctx.moveTo(x, y);
-        ctx.quadraticCurveTo(x + mx * bl * 0.6, y + my * bl * 0.6, x + rx * bl, y + ry * bl);
-      }
-    }
-  }
-  /* dark underlay for depth, then main color on top */
-  ctx.strokeStyle = dark;
-  ctx.lineWidth = 2.9 * wm; barbs(1.06); ctx.stroke();
-  ctx.lineWidth = 4.1 * wm;
-  ctx.beginPath(); ctx.moveTo(bx, by); ctx.quadraticCurveTo(cx, cy, tx, ty); ctx.stroke();
-  ctx.strokeStyle = main;
-  ctx.lineWidth = 1.9 * wm; barbs(1); ctx.stroke();
-  ctx.lineWidth = 2.5 * wm;
-  ctx.beginPath(); ctx.moveTo(bx, by); ctx.quadraticCurveTo(cx, cy, tx, ty); ctx.stroke();
-  ctx.fillStyle = main;
-  ctx.beginPath(); ctx.arc(tx, ty, 1.8 * wm, 0, 6.2832); ctx.fill();
+function lerp(a, b, k) { return a + (b - a) * k; }
+function mix(c1, c2, k) {
+  return 'rgb(' + Math.round(lerp(c1[0], c2[0], k)) + ',' +
+                  Math.round(lerp(c1[1], c2[1], k)) + ',' +
+                  Math.round(lerp(c1[2], c2[2], k)) + ')';
 }
 
-function drawGills(hy, t, gp){
-  var pulse = 0.5 + 0.5 * Math.sin(t * 3.3);
-  var colT  = clamp(P.glow + P.pu * 0.35 * pulse, 0, 1);
-  var wm    = 1 + P.pu * 0.22 * pulse;
-  var main  = gillCol(colT, 1), dark = gillCol(colT, 0.55);
-  for (var s = -1; s <= 1; s += 2){
-    for (var i = 0; i < 3; i++){
-      var q    = STALKS[i];
-      var sway = Math.sin(gp + q.ph + (s > 0 ? 0 : 2.1)) * (0.06 + 0.055 * P.ga);
-      var ang  = q.a + sway + P.sl * 0.35;                    /* droop when asleep */
-      var bx   = 110 + Math.cos(q.a) * 50 * s;
-      var by   = hy  + Math.sin(q.a) * 42;
-      var dx   = Math.cos(ang) * s, dy = Math.sin(ang);
-      var L    = q.l * (1 + 0.04 * Math.sin(gp * 1.3 + q.ph));
-      var cx   = bx + dx * L * 0.55, cy = by + dy * L * 0.55 - 1.5 + P.sl * 2;
-      var tx   = bx + dx * L,        ty = by + dy * L + L * 0.10 + P.sl * 4;
-      stalk(bx, by, cx, cy, tx, ty, q.f, main, dark, wm);
-    }
+function frame(tms) {
+  var dt = lastT === null ? 16 : Math.min(50, tms - lastT);
+  lastT = tms;
+  var t = tms / 1000;
+  var k = 1 - Math.exp(-dt / 1000 * 5); // ~200ms easing
+
+  var tgt = TARGETS[state.mood] || TARGETS.idle;
+  for (var key in P) {
+    var goal = (key in tgt) ? tgt[key] : 0;
+    if (key === 'lid' && state.drowsy && state.mood !== 'asleep') goal = Math.max(goal, 0.6);
+    P[key].v = lerp(P[key].v, goal, k);
   }
+
+  // blink scheduling (suppressed under heavy lids)
+  blinkAt -= dt;
+  if (blinkAt <= 0 && P.lid.v < 0.5) { blink = 1; blinkAt = 4000 + Math.random() * 3000; }
+  blink = Math.max(0, blink - dt / 130);
+
+  if (wiggleT >= 0) wiggleT += dt;
+  if (wiggleT > 700) wiggleT = -1;
+  if (state.mood === 'needs_you') {
+    nextHop -= dt;
+    if (nextHop <= 0 && hopT < 0) { hopT = 0; nextHop = 2200 + Math.random() * 1800; }
+  }
+  if (hopT >= 0) hopT += dt;
+  if (hopT > 420) hopT = -1;
+
+  draw(t);
 }
 
-function drawBody(){
-  ctx.fillStyle = bodyG;
-  ctx.beginPath(); ctx.ellipse(110, 158, 37, 36, 0, 0, 6.2832); ctx.fill();
-}
-
-function drawBelly(t){
-  var s = 1 + 0.12 * P.belly;
-  ctx.fillStyle = '#2e2e35';
-  ctx.beginPath(); ctx.ellipse(110, 166, 22 * s, 19 * s, 0, 0, 6.2832); ctx.fill();
-  var a = P.bh * (0.05 + 0.045 * Math.sin(t * 1.7));      /* faint slow red pulse >85% */
-  if (a > 0.004){
-    ctx.fillStyle = 'rgba(255,43,51,' + a.toFixed(3) + ')';
-    ctx.beginPath(); ctx.ellipse(110, 166, 22 * s, 19 * s, 0, 0, 6.2832); ctx.fill();
-  }
-}
-
-function drawLimbs(bp){
-  var sw = Math.sin(bp) * 0.7;
-  ctx.strokeStyle = '#26262c'; ctx.lineWidth = 9;
-  ctx.beginPath();
-  ctx.moveTo(93, 168);  ctx.quadraticCurveTo(89, 176, 88 + sw, 184);
-  ctx.moveTo(127, 168); ctx.quadraticCurveTo(131, 176, 132 - sw, 184);
-  ctx.stroke();
-  ctx.fillStyle = '#17171b';
-  for (var i = -1; i <= 1; i++){
-    ctx.beginPath(); ctx.arc(88 + sw + i * 2.8, 186.5, 1.1, 0, 6.2832); ctx.fill();
-    ctx.beginPath(); ctx.arc(132 - sw + i * 2.8, 186.5, 1.1, 0, 6.2832); ctx.fill();
-  }
-}
-
-function drawHead(hy){
-  ctx.fillStyle = headG;
-  ctx.beginPath(); ctx.ellipse(110, hy, 54, 47, 0, 0, 6.2832); ctx.fill();
-}
-
-function drawEye(ex, ey, o){
-  var rx = 8 * P.es, ry = 8.6 * P.es;
-  if (o <= 0.04){
-    /* closed: gentle content curve */
-    ctx.strokeStyle = '#0b0b0d'; ctx.lineWidth = 1.8;
-    ctx.beginPath(); ctx.moveTo(ex - 6, ey + 1); ctx.quadraticCurveTo(ex, ey + 5, ex + 6, ey + 1); ctx.stroke();
-    return;
-  }
-  ctx.save();
-  ctx.beginPath(); ctx.ellipse(ex, ey, rx, ry, 0, 0, 6.2832); ctx.clip();
-  ctx.fillStyle = '#e8e8ec';
-  ctx.fillRect(ex - rx - 1, ey - ry - 1, rx * 2 + 2, ry * 2 + 2);
-  ctx.fillStyle = '#0b0b0d';
-  ctx.beginPath(); ctx.arc(ex + P.px, ey + 1.5 + P.py, 3.8, 0, 6.2832); ctx.fill();
-  ctx.fillStyle = '#e8e8ec';
-  ctx.beginPath(); ctx.arc(ex + P.px - 1.3, ey + P.py, 1.1, 0, 6.2832); ctx.fill();
-  if (o < 0.97){
-    /* lid slides down from the top, curved lower edge */
-    var lidY = (ey - ry) + (1 - o) * (2 * ry);
-    ctx.fillStyle = '#1d1d22';
-    ctx.beginPath();
-    ctx.moveTo(ex - rx - 1, ey - ry - 1);
-    ctx.lineTo(ex + rx + 1, ey - ry - 1);
-    ctx.lineTo(ex + rx + 1, lidY);
-    ctx.quadraticCurveTo(ex, lidY + 3, ex - rx - 1, lidY);
-    ctx.closePath(); ctx.fill();
-  }
-  ctx.restore();
-}
-
-function drawFace(hy, blinkK){
-  var o = P.eo * (1 - blinkK);
-  drawEye(110 - 23, hy - 5, o);
-  drawEye(110 + 23, hy - 5, o);
-  ctx.fillStyle = '#141418';
-  ctx.beginPath(); ctx.arc(104, hy + 4, 0.9, 0, 6.2832); ctx.fill();
-  ctx.beginPath(); ctx.arc(116, hy + 4, 0.9, 0, 6.2832); ctx.fill();
-  var w = 10 + P.sm * 7, d = 3 + P.sm * 4.5, my = hy + 10;
-  ctx.strokeStyle = '#0b0b0d'; ctx.lineWidth = 1.7;
-  ctx.beginPath(); ctx.moveTo(110 - w / 2, my); ctx.quadraticCurveTo(110, my + d, 110 + w / 2, my); ctx.stroke();
-}
-
-function drawDots(){
-  var n = st.sessions >= 2 ? Math.min(st.sessions, 5) : 0;
-  if (!n) return;
-  ctx.fillStyle = '#8b1a1e';
-  var x0 = 110 - (n - 1) * 4.5;
-  for (var i = 0; i < n; i++){
-    ctx.beginPath(); ctx.arc(x0 + i * 9, 204, 1.5, 0, 6.2832); ctx.fill();
-  }
-}
-
-/* ---------- main loop ---------- */
-var last = 0, bp = 0, gp = 0, fp = 0, bobp = 0, tp = 0;
-
-function frame(){
-  var t = tnow(), dt = clamp(t - last, 0.001, 0.05); last = t;
-
-  /* ease every parameter toward its mood target */
-  var base = MT[st.mood], tg = {}, k;
-  for (k in base) tg[k] = base[k];
-  if (st.drowsy) tg.eo = Math.min(tg.eo, 0.4);       /* heavy lids on any mood */
-  tg.glow  = st.nightGlow ? 1 : 0;
-  tg.belly = st.ctxPct == null ? 0 : st.ctxPct / 100;
-  tg.bh    = (st.ctxPct != null && st.ctxPct > 85) ? 1 : 0;
-  for (k in tg) P[k] += (tg[k] - P[k]) * (1 - Math.exp(-(RATE[k] || 3) * dt));
-
-  /* accumulated phases so eased rates never snap */
-  bp   += dt * 6.2832 * P.br;
-  gp   += dt * P.gs * 2.1;
-  fp   += dt * 0.85;
-  bobp += dt * 6.2832 * 1.35;
-  tp   += dt * (0.9 - 0.55 * P.sl);
-
-  /* blink */
-  if (P.sl < 0.5 && base.eo > 0.05 && t > nextBlink){
-    blinkStart = t; nextBlink = t + 4 + Math.random() * 3;
-  }
-  var bu = (t - blinkStart) / 0.24;
-  var blinkK = (bu >= 0 && bu < 1) ? Math.sin(Math.PI * bu) : 0;
-
-  /* occasional tiny hop while needs_you */
-  if (st.mood === 'needs_you' && P.ex > 0.6 && t > nextHop && t > hopStart + 0.6){
-    hopStart = t; nextHop = t + 2.2 + Math.random() * 2.6;
-  }
-  var hu = (t - hopStart) / 0.42, hopY = 0, hk = 0;
-  if (hu >= 0 && hu < 1){ hk = Math.sin(Math.PI * hu); hopY = -11 * hk; }
-
-  /* entry wiggle for done */
-  var wu = t - wiggleAt, rot = 0;
-  if (wu >= 0 && wu < 0.9) rot = Math.sin(wu * 15) * 0.085 * (1 - wu / 0.9);
-  rot += P.ex * 0.03;
-
-  var yOff = Math.sin(bobp) * 1.7 * P.wk + Math.sin(fp) * 2.8 * P.fl + hopY + P.sl * 4;
-  var xOff = Math.sin(fp * 0.6) * 1.4 * P.fl;
-
-  /* breathing squash/stretch about the ground pivot */
-  var bs = Math.sin(bp), amp = 0.026 * (1 - 0.25 * P.sl);
-  var sx = 1 - amp * bs * 0.8, sy = 1 + amp * bs;
-  sy *= (1 + 0.06 * hk) * (1 - 0.05 * P.sl);
-  sx *= (1 - 0.05 * hk);
-
+function draw(t) {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.clearRect(0, 0, W, H);
+
+  var ign = P.ign.v;
+  var overburn = (typeof state.ctxPct === 'number' && state.ctxPct > 85)
+    ? (state.ctxPct - 85) / 15 : 0;
+  var dayBank = state.nightGlow ? 0 : 0.55; // grey in daylight
+
+  // motion
+  var breath = 1 + 0.025 * Math.sin(t * (state.mood === 'asleep' ? 0.7 : 1.6));
+  var sway = (state.mood === 'idle') ? Math.sin(t * 0.7) * 1.5 : 0;
+  var bob = (state.mood === 'working') ? Math.sin(t * 5.6) * 1.6 : 0;
+  var wig = (wiggleT >= 0) ? Math.sin(wiggleT / 700 * Math.PI * 4) * 3 : 0;
+  var hop = (hopT >= 0) ? -Math.sin(hopT / 420 * Math.PI) * 9 : 0;
+  var flick = 1 + (state.mood === 'working' ? 0.18 : 0.08) * Math.sin(t * 9.3)
+                + 0.05 * Math.sin(t * 23.7);
+
+  var cx = W / 2 + sway + wig;
+  var cy = 128 + P.sink.v + bob + hop + P.hunch.v * 0.5;
+  var tilt = -P.headUp.v * 0.10 + P.hunch.v * 0.014 + wig * 0.01;
+
   ctx.save();
-  ctx.translate(ox, oy); ctx.scale(fit, fit);
-  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.translate(cx, cy);
+  ctx.rotate(tilt);
+  ctx.scale(1 / breath, breath);
 
-  drawShadow(yOff - P.sl * 4);
+  // tail nub
+  ctx.fillStyle = SOOT_LO;
+  ctx.beginPath();
+  ctx.ellipse(-46, 26, 12, 8, 0.6, 0, Math.PI * 2);
+  ctx.fill();
 
-  ctx.save();
-  ctx.translate(xOff, yOff);
-  ctx.translate(110, 192); ctx.rotate(rot); ctx.scale(sx, sy); ctx.translate(-110, -192);
+  // body — soot egg with radial coal shading
+  var g = ctx.createRadialGradient(-8, -18, 8, 0, 4, 66);
+  g.addColorStop(0, SOOT_HI); g.addColorStop(0.65, SOOT); g.addColorStop(1, SOOT_LO);
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 52, 58, 0, 0, Math.PI * 2);
+  ctx.fill();
 
-  var hy = 96 + P.sl * 5;          /* head settles when asleep */
-  drawTail(tp);
-  drawGills(hy, t, gp);
-  drawBody();
-  drawBelly(t);
-  drawLimbs(bp);
-  drawHead(hy);
-  drawFace(hy, blinkK);
-  ctx.restore();
-
-  drawDots();
-  ctx.restore();
-
-  if (DBG){
-    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-    ctx.fillStyle = '#666';
-    ctx.font = '10px system-ui, Segoe UI, sans-serif';
-    ctx.fillText(st.mood, 8, 14);
-  }
-  requestAnimationFrame(frame);
-}
-
-/* ---------- debug harness ---------- */
-if (DBG){
-  document.body.style.background = '#0e0e12';
-  var order = ['working', 'needs_you', 'done', 'idle', 'asleep'];
-  setInterval(function(){
-    var el = tnow();
-    window.juna.setState({
-      mood: order[Math.floor(el / 2.5) % order.length],
-      ctxPct: (el % 12.5) / 12.5 * 95,
-      drowsy: false,
-      sessions: 3,
-      nightGlow: true
+  // coal facets (static darker patches)
+  ctx.fillStyle = 'rgba(10,10,13,0.35)';
+  [[-24, 14, 14, 9, 0.4], [18, 26, 12, 7, -0.5], [26, -18, 10, 6, 0.9], [-14, -34, 9, 6, -0.3]]
+    .forEach(function (f) {
+      ctx.beginPath(); ctx.ellipse(f[0], f[1], f[2], f[3], f[4], 0, Math.PI * 2); ctx.fill();
     });
-  }, 250);
+
+  // wings — stubby, slightly darker; lift on wave/needs_you flap
+  var wingLift = P.wing.v * 26 + (state.mood === 'needs_you' ? Math.max(0, Math.sin(t * 6)) * 4 : 0);
+  ctx.fillStyle = SOOT_LO;
+  ctx.beginPath();
+  ctx.ellipse(-48, 20 - wingLift * 0.4, 10, 17, 0.45 - wingLift * 0.02, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(48, 20 - wingLift, 10, 17, -0.45 + wingLift * 0.03, 0, Math.PI * 2);
+  ctx.fill();
+
+  // ember veins — clipped to body, glow pass + core pass (+ overburn cores)
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 52, 58, 0, 0, Math.PI * 2);
+  ctx.clip();
+  // vein color: dim->bright ember by ignition, banked toward grey in daylight
+  var base = [
+    lerp(EMBER_DIM[0], EMBER[0], ign),
+    lerp(EMBER_DIM[1], EMBER[1], ign),
+    lerp(EMBER_DIM[2], EMBER[2], ign),
+  ];
+  if (dayBank) base = [lerp(base[0], DAY_GREY[0], dayBank), lerp(base[1], DAY_GREY[1], dayBank), lerp(base[2], DAY_GREY[2], dayBank)];
+  var baseCss = 'rgb(' + base.map(Math.round).join(',') + ')';
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  VEINS.forEach(function (v, vi) {
+    var pulse = flick * (1 + 0.12 * Math.sin(t * 3.1 + vi * 1.7));
+    ctx.beginPath();
+    ctx.moveTo(v[0][0], v[0][1]);
+    for (var i = 1; i < v.length; i++) ctx.lineTo(v[i][0], v[i][1]);
+    ctx.strokeStyle = baseCss;
+    ctx.globalAlpha = Math.min(1, 0.22 * ign * pulse * (1 - dayBank * 0.4) + 0.04);
+    ctx.lineWidth = 4.5;
+    ctx.stroke();
+    ctx.globalAlpha = Math.min(1, (0.25 + 0.75 * ign) * pulse * (1 - dayBank * 0.3));
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    if (overburn > 0) {
+      ctx.strokeStyle = 'rgb(' + HOT_CORE.join(',') + ')';
+      ctx.globalAlpha = 0.55 * overburn * (0.6 + 0.4 * Math.sin(t * 4.2 + vi));
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+    }
+  });
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  // eyes — small, hotter than the veins; always the brightest thing
+  var eyeY = -18 - P.headUp.v * 4;
+  var lidTotal = Math.min(1, Math.max(P.lid.v, blink));
+  [-20, 20].forEach(function (ex) {
+    if (lidTotal < 0.98) {
+      var eyeIgn = Math.max(0.55, ign) * (1 - dayBank * 0.25);
+      ctx.globalAlpha = 0.3 * eyeIgn;
+      ctx.fillStyle = 'rgb(255,90,74)';
+      ctx.beginPath(); ctx.arc(ex, eyeY, 7, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.beginPath(); ctx.arc(ex, eyeY, 4.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgb(' + HOT_CORE.join(',') + ')';
+      ctx.beginPath(); ctx.arc(ex, eyeY, 1.7 + overburn * 0.8, 0, Math.PI * 2); ctx.fill();
+      // eyelid sweep (soot-colored)
+      if (lidTotal > 0.02) {
+        ctx.fillStyle = SOOT;
+        ctx.fillRect(ex - 8, eyeY - 8, 16, 16 * lidTotal - 8 + 1);
+      }
+    } else {
+      // closed: dark seam with a faint banked ember underneath
+      ctx.strokeStyle = 'rgba(11,11,13,1)';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(ex - 4, eyeY); ctx.quadraticCurveTo(ex, eyeY + 2, ex + 4, eyeY); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,43,51,' + (0.12 + 0.06 * Math.sin(t * 1.3)) + ')';
+      ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.moveTo(ex - 3, eyeY + 1.5); ctx.quadraticCurveTo(ex, eyeY + 3, ex + 3, eyeY + 1.5); ctx.stroke();
+    }
+  });
+
+  // beak — small triangle, slightly lighter than the face so it silhouettes,
+  // with an ember-lit lower edge
+  ctx.fillStyle = '#33333b';
+  ctx.beginPath();
+  ctx.moveTo(-5.5, -9); ctx.lineTo(5.5, -9); ctx.lineTo(0, -1);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = baseCss;
+  ctx.globalAlpha = 0.55 + 0.45 * ign;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.moveTo(-4.5, -8); ctx.lineTo(0, -1.6); ctx.lineTo(4.5, -8); ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  // rim light — separates the soot body from dark wallpapers
+  ctx.strokeStyle = '#3a3a42';
+  ctx.globalAlpha = 0.55;
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 51.4, 57.4, 0, -Math.PI * 0.92, -Math.PI * 0.12);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  ctx.restore();
+
+  // session dots
+  if (state.sessions >= 2) {
+    var n = Math.min(state.sessions, 5);
+    ctx.fillStyle = '#8b1a1e';
+    var total = n * 8 - 5;
+    var x0 = (W - total) / 2;
+    for (var i = 0; i < n; i++) {
+      ctx.beginPath();
+      ctx.arc(x0 + i * 8 + 1.5, H - 6, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
 }
 
-resize();
-requestAnimationFrame(frame);
+function loop(tms) { frame(tms); requestAnimationFrame(loop); }
+requestAnimationFrame(loop);
+
+// ---- public API -----------------------------------------------------------
+window.juna = { // bridge.js looks for window.vivarium || window.juna
+  setState: function (s) {
+    if (!s) return;
+    ['ctxPct', 'drowsy', 'sessions', 'nightGlow'].forEach(function (kk) {
+      if (kk in s && s[kk] !== undefined) state[kk] = s[kk];
+    });
+    if (s.mood && s.mood !== lastMood) {
+      if (s.mood === 'done') wiggleT = 0;
+      lastMood = s.mood;
+    }
+    if (s.mood) state.mood = s.mood;
+    if (s.debugCaption !== undefined) document.getElementById('caption').textContent = s.debugCaption;
+  },
+};
+
+// test hook for headless verification (rAF pauses when not composited)
+window.__huma = {
+  step: function (ms) { frame((lastT === null ? 0 : lastT) + (ms || 16)); },
+  params: function () { var o = {}; for (var kk in P) o[kk] = +P[kk].v.toFixed(3); return o; },
+  occupancy: function () {
+    var d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    var n = 0;
+    for (var i = 3; i < d.length; i += 4) if (d[i] > 10) n++;
+    return n;
+  },
+  snapshot: function () { return canvas.toDataURL(); },
+};
+
+// ---- debug mode -----------------------------------------------------------
+(function () {
+  if (!/\bdebug\b/.test(location.search)) return;
+  document.body.classList.add('debug');
+  var phases = [
+    { mood: 'working', cap: 'working — veins ignited' },
+    { mood: 'needs_you', cap: 'needs_you — head up, flap, hop' },
+    { mood: 'done', cap: 'done — wiggle, content' },
+    { mood: 'idle', cap: 'idle — banked embers' },
+    { mood: 'idle', cap: 'overburn — ctx 92%', ctx: 92 },
+    { mood: 'idle', cap: 'daylight — banked grey', night: false },
+    { mood: 'asleep', cap: 'asleep — ember seam' },
+  ];
+  var i = 0;
+  setInterval(function () {
+    var p = phases[i++ % phases.length];
+    window.juna.setState({ mood: p.mood, sessions: 3, drowsy: false,
+      nightGlow: p.night !== false, ctxPct: p.ctx || 40, debugCaption: p.cap });
+  }, 2800);
 })();
 </script>
-<script src="bridge.js"></script></body>
+<script src="bridge.js"></script>
+</body>
 </html>

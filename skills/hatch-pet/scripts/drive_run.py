@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""Execute a hatch-pet run manifest (jobs.json) against an image backend.
+
+Walks the dependency-ordered jobs, generates each pending image, then
+auto-extracts row strips into 192x208 cells via extract_row_strip.py.
+Backends:
+  gemini  - Google AI Studio image API (needs GEMINI_API_KEY env var)
+  flux    - local ComfyUI at http://127.0.0.1:8188 (needs a workflow template;
+            see the NotImplementedError message for wiring instructions)
+
+Usage:
+  python drive_run.py --run-dir <dir-with-jobs.json> --backend gemini [--only JOB_ID]
+
+After all jobs are complete, finish with compose_atlas.py / validate_atlas.py /
+make_contact_sheet.py / render_previews.py per the hatch-pet skill.
+"""
+import argparse
+import base64
+import json
+import os
+import subprocess
+import sys
+import urllib.request
+
+SCRIPTS = os.path.dirname(os.path.abspath(__file__))
+
+GEMINI_MODEL = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
+
+
+def gen_gemini(prompt, ref_paths, out_path):
+    key = os.environ.get("GEMINI_API_KEY")
+    if not key:
+        raise SystemExit("GEMINI_API_KEY is not set")
+    parts = [{"text": prompt}]
+    for rp in ref_paths:
+        with open(rp, "rb") as f:
+            parts.append({"inline_data": {"mime_type": "image/png",
+                                          "data": base64.b64encode(f.read()).decode()}})
+    body = json.dumps({"contents": [{"parts": parts}]}).encode()
+    url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+           f"{GEMINI_MODEL}:generateContent?key={key}")
+    req = urllib.request.Request(url, data=body,
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=180) as r:
+        resp = json.load(r)
+    for cand in resp.get("candidates", []):
+        for part in cand.get("content", {}).get("parts", []):
+            blob = part.get("inline_data") or part.get("inlineData")
+            if blob and blob.get("data"):
+                os.makedirs(os.path.dirname(out_path), exist_ok=True)
+                with open(out_path, "wb") as f:
+                    f.write(base64.b64decode(blob["data"]))
+                return
+    raise RuntimeError(f"no image in Gemini response: {json.dumps(resp)[:400]}")
+
+
+def gen_flux(prompt, ref_paths, out_path):
+    raise NotImplementedError(
+        "FLUX backend not wired yet. Plan: run ComfyUI on the local GPU, save a "
+        "workflow template with a reference-image (Kontext/redux) node, then POST "
+        "it to http://127.0.0.1:8188/prompt with the prompt + refs substituted, "
+        "poll /history/<prompt_id>, and copy the output image to out_path. "
+        "Implement in this function; everything else in the pipeline is ready."
+    )
+
+
+BACKENDS = {"gemini": gen_gemini, "flux": gen_flux}
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--run-dir", required=True)
+    ap.add_argument("--backend", required=True, choices=sorted(BACKENDS))
+    ap.add_argument("--only", help="run just this job id")
+    args = ap.parse_args()
+
+    run = args.run_dir
+    manifest_path = os.path.join(run, "jobs.json")
+    manifest = json.load(open(manifest_path, encoding="utf-8"))
+    jobs = {j["id"]: j for j in manifest["jobs"]}
+    chroma = manifest["pet"].get("chroma_key", "00ff00")
+    gen = BACKENDS[args.backend]
+
+    def ready(j):
+        return (j["status"] != "complete"
+                and all(jobs[d]["status"] == "complete" for d in j["depends_on"]))
+
+    progressed = True
+    while progressed:
+        progressed = False
+        for j in manifest["jobs"]:
+            if args.only and j["id"] != args.only:
+                continue
+            if not ready(j):
+                continue
+            prompt = open(os.path.join(run, j["prompt"]), encoding="utf-8").read()
+            refs = [os.path.join(run, r) for r in j.get("refs", [])]
+            out = os.path.join(run, j["output"])
+            print(f"[{j['id']}] generating ({args.backend}) -> {j['output']}")
+            gen(prompt, refs, out)
+            if j["kind"] in ("row-strip", "look-row", "cardinal-strip"):
+                cells = os.path.join(run, "frames",
+                                     "look" if j["kind"] == "look-row" else j["id"])
+                report = os.path.join(run, "qa", f"{j['id']}.json")
+                os.makedirs(os.path.dirname(report), exist_ok=True)
+                rc = subprocess.call([sys.executable,
+                                      os.path.join(SCRIPTS, "extract_row_strip.py"),
+                                      out, "--expected-frames", str(j["frames"]),
+                                      "--chroma-key", chroma,
+                                      "--output-dir", cells, "--json-out", report])
+                if rc != 0:
+                    print(f"[{j['id']}] extraction FAILED - inspect {report}; "
+                          f"job left pending for regeneration")
+                    continue
+                if j["kind"] == "look-row":
+                    # rename 00..07 to the degree names compose_atlas expects
+                    # (000, 022.5, 045 ... zero-padded, halves keep one decimal)
+                    start = 0.0 if j["id"].endswith("9") else 180.0
+                    for i in range(8):
+                        deg = start + i * 22.5
+                        name = f"{int(deg):03d}" if deg == int(deg) else f"{deg:05.1f}"
+                        src = os.path.join(cells, f"{i:02d}.png")
+                        if os.path.exists(src):
+                            os.replace(src, os.path.join(cells, name + ".png"))
+            j["status"] = "complete"
+            json.dump(manifest, open(manifest_path, "w", encoding="utf-8"), indent=2)
+            progressed = True
+
+    pending = [j["id"] for j in manifest["jobs"] if j["status"] != "complete"]
+    print("all jobs complete" if not pending else f"pending: {', '.join(pending)}")
+
+
+if __name__ == "__main__":
+    main()

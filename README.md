@@ -22,8 +22,8 @@ picker. See [docs/format.md](docs/format.md) for the full contract.
 - **v2 look directions, actually implemented**: when idle, the pet's gaze
   follows your mouse cursor around all 16 clockwise look cells, with the
   contract's neutral deadzone falling back to idle.
-- **Status line pet**: a zero-dependency text pet (`~(˘ᴗ˘)~`) showing context
-  pressure ("% devoured"), model, git branch, and session cost. It doubles as
+- **Status line pet**: a zero-dependency text pet (`~(•v•)~`) showing context
+  pressure ("% burned"), model, git branch, and session cost. It doubles as
   the overlay's heartbeat.
 - **Hatch pets with Claude**: the bundled `hatch-pet` skill walks Claude
   through generating a new pet — base art from any image-generation tool you
@@ -56,8 +56,12 @@ overlay main.js  ──(reads 1s)──▶  aggregate mood ──▶  sprite row
 
 ## Built-in pet
 
-Ships with **Juna**, a procedurally-animated melanoid axolotl (no spritesheet
-required), so the overlay works before you hatch or install any sprite pet.
+Ships with **Huma**, a procedurally-animated ash-phoenix chick — soot-black
+coal body, signal-red ember veins that ignite while Claude works, eyes hotter
+than the veins, banked grey in daylight, overburning past 85% context. No
+spritesheet required, so the overlay works before you hatch or install any
+sprite pet. (Named for the Persian-Islamic bird that never completes its
+burning cycle.)
 
 ## Credits
 

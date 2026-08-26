@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Juna — a melanoid axolotl that lives in the Claude Code status line.
+"""Huma — an ash-phoenix chick that lives in the Claude Code status line.
 
 Reads the statusline JSON from stdin, keeps a small persistent state file,
 and prints one ANSI-colored line. Never crashes: any failure degrades to a
@@ -106,23 +106,26 @@ def git_branch(cwd):
     return None
 
 
-def face_and_gills(pct, hour):
-    # frame cycle: gills flutter once per second
+def bird_sprite(pct, hour):
+    """Huma: ash-phoenix chick. Wings = ember veins (bright at night, banked
+    grey by day), eyes = small but hotter than the veins, sized by burn."""
     frame = int(time.time()) % 2
-    gl, gr = ("~", "~") if frame == 0 else ("≈", "≈")
-    if 7 <= hour < 15:
-        face = "-ᴗ-"          # drowsy — daylight is for sleeping
-    elif pct is None:
-        face = "·ᴗ·"
-    elif pct < 25:
-        face = "˙ᴗ˙"          # hungry, hunting
+    wing = "~" if frame == 0 else "≈"
+    night = hour >= 22 or hour < 7
+    day = 7 <= hour < 15
+    wing_color = RED if night else (FAINT if day else DARKRED)
+    if day:
+        eye, eye_color = "-", DIM          # banked, grey daylight
+    elif pct is None or pct < 25:
+        eye, eye_color = "·", RED          # low burn
     elif pct < 60:
-        face = "˘ᴗ˘"          # content
+        eye, eye_color = "•", RED          # lit
     elif pct < 85:
-        face = "˘ᴥ˘"          # well fed
+        eye, eye_color = "●", RED          # hot
     else:
-        face = "˚o˚"          # stuffed — compact soon
-    return gl, face, gr
+        eye, eye_color = "◉", RED          # overburn — compact soon
+    face = f"{WHITE}({RESET}{eye_color}{eye}{RESET}{WHITE}v{RESET}{eye_color}{eye}{RESET}{WHITE}){RESET}"
+    return f"{wing_color}{wing}{RESET}{face}{wing_color}{wing}{RESET}"
 
 
 def belly_meter(pct):
@@ -132,7 +135,7 @@ def belly_meter(pct):
     filled = min(cells, int(round(pct / 100 * cells)))
     color = RED if pct >= 85 else DARKRED
     bar = color + "▰" * filled + FAINT + "▱" * (cells - filled) + RESET
-    return f"{bar} {DIM}{pct}% devoured{RESET}"
+    return f"{bar} {DIM}{pct}% burned{RESET}"
 
 
 def level(hours):
@@ -211,12 +214,10 @@ def main():
     # heartbeat for the desktop overlay (throttled to every 2s per session)
     write_heartbeat(sid, now, pct, model, cwd, cost, lv)
 
-    gl, face, gr = face_and_gills(pct, hour)
-    gill_color = RED if (hour >= 22 or hour < 7) else DARKRED  # gills glow at night
-    sprite = f"{gill_color}{gl}{RESET}{WHITE}({face}){RESET}{gill_color}{gr}{RESET}"
+    sprite = bird_sprite(pct, hour)
 
     sep = f" {FAINT}·{RESET} "
-    parts = [f"{sprite} {DIM}juna lv{lv}{RESET}"]
+    parts = [f"{sprite} {DIM}huma lv{lv}{RESET}"]
     loc = os.path.basename(cwd.rstrip("/\\")) if cwd else ""
     branch = git_branch(cwd) if cwd else None
     if loc:
@@ -238,4 +239,4 @@ if __name__ == "__main__":
             sys.stdout.reconfigure(encoding="utf-8")
         main()
     except Exception:
-        sys.stdout.write("~(·ᴗ·)~ juna")
+        sys.stdout.write("~(·v·)~ huma")
