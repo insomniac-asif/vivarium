@@ -31,10 +31,19 @@ What the ecosystem does, and what Vivarium implements.
   while following the cursor.
 - **Session tray** (Codex attaches an activity list to its pet; this is that):
   hover the pet for ~0.4s and a card opens listing every live session — the
-  folder and git branch, what it is doing, how long since it moved, the model,
+  project and git branch, what it is doing, how long since it moved, the model,
   the cost, and a context-pressure meter that turns pale past 85%. Clicking a
   row raises that session's window. The card follows the pet, refreshes every
   second while open, and hides when you move away.
+- **Liveness is the process, not a timer**: each session records the pid of the
+  process running it, so one whose window was closed or killed disappears at
+  once instead of lingering for the timeout — a window that dies has no chance
+  to fire SessionEnd. Sessions the pid cannot be read for fall back to a short
+  time window. One window and one working directory is one row, so a resumed
+  session does not show up twice, and the row is named for the repository
+  rather than whatever folder happens to be underneath it. The dots the pet
+  carries and the rows the tray lists come from the same pool, so they cannot
+  disagree.
 - **Click = launcher** (Codex's actual behaviour): a quick tap opens the tray
   AND raises the window of the session the pet is speaking for — whoever needs
   input, else whoever ran most recently. Each session records its host window

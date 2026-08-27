@@ -59,6 +59,10 @@ def record(data):
         host = find_host_window_pid()
         if host:
             state["host_pid"] = host
+    if evt == "SessionStart" or not state.get("owner_pid"):
+        owner = find_owner_pid()
+        if owner:
+            state["owner_pid"] = owner
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f)
@@ -121,6 +125,32 @@ def _proc_parents():
 # processes that merely relay the hook, never the window the user looks at
 _RELAY = ("python", "python3", "py", "node", "bun", "bash", "sh", "zsh",
           "conhost", "cmd")
+
+
+def find_owner_pid():
+    """The process actually running this session (the Claude CLI/app process).
+
+    Liveness by timestamp alone is a guess: a session whose window was closed
+    without a SessionEnd hook keeps looking alive for half an hour. If the
+    process that owns it is gone, the session is gone.
+    """
+    table = _proc_parents()
+    if not table:
+        return None
+    pid = os.getpid()
+    for _ in range(14):
+        entry = table.get(pid)
+        if not entry:
+            return None
+        ppid, _n = entry
+        parent = table.get(ppid)
+        if not parent:
+            return None
+        stem = parent[1].rsplit(".", 1)[0]
+        if stem in ("claude", "node", "bun"):
+            return ppid
+        pid = ppid
+    return None
 
 
 def find_host_window_pid():

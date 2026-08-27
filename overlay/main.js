@@ -39,6 +39,7 @@ let emptySince = 0;
 let pinned = false;   // 'Keep still': stay put instead of patrolling
 let lastSessionStartTs = 0;
 let lastLookDir = -1;
+let lastTracedShape = null;
 
 if (!app.requestSingleInstanceLock()) app.exit(0);
 
@@ -119,12 +120,24 @@ function lastSeen(s) {
                   s.stop_ts || 0, s.notify_ts || 0, s.start_ts || 0);
 }
 
-// A session counts as live only if it actually took a turn (prompt or start)
-// and has not ended. Subagent//-command noise never carries those stamps.
+function pidAlive(pid) {
+  if (!pid) return null;                 // unknown, fall back to timestamps
+  try { process.kill(pid, 0); return true; } catch (e) {
+    return e.code === 'EPERM';           // exists but not ours to signal
+  }
+}
+
+// A session counts as live only if it took a turn, has not ended, AND the
+// process running it is still there. Timestamps alone kept sessions "alive"
+// for half an hour after their window was closed, which is how the tray ended
+// up listing sessions that no longer existed.
 function isLive(s, now) {
   if (s.ended_ts) return false;
   if (!s.prompt_ts && !s.start_ts) return false;
-  return now - lastSeen(s) < 1800;
+  const alive = pidAlive(s.owner_pid);
+  if (alive === false) return false;     // its process is gone: it is gone
+  const window = alive === true ? 3600 : 900;   // unverifiable: trust less
+  return now - lastSeen(s) < window;
 }
 
 function readSessionStates() {
@@ -137,8 +150,11 @@ function readSessionStates() {
     const p = path.join(STATE_DIR, f);
     try {
       const s = JSON.parse(fs.readFileSync(p, 'utf8'));
-      // reap: ended sessions after 10 min, anything untouched for a day
-      if ((s.ended_ts && now - s.ended_ts > 600) || now - lastSeen(s) > 86400) {
+      // reap: ended sessions after 10 min, anything untouched for a day, and
+      // sessions whose process died without a SessionEnd hook (a closed window
+      // or a killed terminal never gets to say goodbye) once they are cold
+      const orphaned = pidAlive(s.owner_pid) === false && now - lastSeen(s) > 300;
+      if ((s.ended_ts && now - s.ended_ts > 600) || now - lastSeen(s) > 86400 || orphaned) {
         fs.unlinkSync(p);
         continue;
       }
@@ -176,22 +192,25 @@ function aggregate() {
   for (const s of states) {
     const m = sessionMood(s, now);
     if (PRECEDENCE.indexOf(m) < PRECEDENCE.indexOf(mood)) mood = m;
-    if (isLive(s, now)) sessions++;
     if (!lead || (s.active_ts || 0) > (lead.active_ts || 0)) lead = s;
     if (s.event === 'SessionStart' && (s.event_ts || 0) > lastSessionStartTs && now - s.event_ts < 10) {
       lastSessionStartTs = s.event_ts;
       sessionStart = true;
     }
   }
-  // remember the shape of the session pool for locomotion
-  states.sort((a, b) => (a.session_id || '').localeCompare(b.session_id || ''));
-  const live = states.filter(s => isLive(s, now));
-  liveSessions = live.length;
-  attentionIndex = live.findIndex(s => sessionMood(s, now) === 'needs_you');
+  const live = livePool(states, now);
+  sessions = live.length;
+  // Locomotion patrols one post per session, so the pool must be ordered by
+  // something stable — sorting by recency would reshuffle the posts every time
+  // a session took a turn and leave the pet skating between them.
+  const posts = live.slice().sort((a, b) =>
+    String(a.session_id || '').localeCompare(String(b.session_id || '')));
+  liveSessions = posts.length;
+  attentionIndex = posts.findIndex(s => sessionMood(s, now) === 'needs_you');
   // clicking the pet should return you to the session it is speaking for:
   // whoever needs you, else whoever ran most recently
   const speaking = attentionIndex >= 0
-    ? live[attentionIndex]
+    ? posts[attentionIndex]
     : live.slice().sort((a, b) => lastSeen(b) - lastSeen(a))[0];
   focusPid = speaking && speaking.host_pid ? speaking.host_pid : null;
 
@@ -205,6 +224,22 @@ function aggregate() {
     nightGlow: hour >= 22 || hour < 7,
     event: sessionStart ? 'SessionStart' : undefined,
   };
+}
+
+function projectName(dir) {
+  // a bare "Desktop" or "home" tells you nothing; prefer the repo root, and
+  // fall back to the folder name only when there is no repo
+  if (!dir) return null;
+  try {
+    let d = String(dir).replace(/[\/]+$/, '');
+    for (let i = 0; i < 6 && d; i++) {
+      if (fs.existsSync(path.join(d, '.git'))) return path.basename(d);
+      const up = path.dirname(d);
+      if (up === d) break;
+      d = up;
+    }
+    return path.basename(String(dir).replace(/[\/]+$/, '')) || null;
+  } catch { return null; }
 }
 
 function gitBranch(dir) {
@@ -225,14 +260,33 @@ function gitBranch(dir) {
   return null;
 }
 
+// The live pool, deduped — the single answer to "what sessions are there?".
+// Both the tray and the pet's own session count read this, so the dots the pet
+// carries can never disagree with the rows the tray lists.
+function livePool(states, now) {
+  const live = states
+    .filter(s => isLive(s, now))
+    .sort((a, b) => lastSeen(b) - lastSeen(a));
+  // Collapse rows that describe the same place: one window, one working
+  // directory, one row. Resumes and re-runs write fresh session ids, so
+  // without this the pool grows an entry per restart.
+  const seen = new Set();
+  const unique = [];
+  for (const s of live) {
+    const key = `${s.owner_pid || s.host_pid || 'x'}|${(s.cwd || '').toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(s);
+  }
+  return unique;
+}
+
 function sessionSummaries() {
   const now = Date.now() / 1000;
-  return readSessionStates()
-    .filter(s => isLive(s, now))
-    .sort((a, b) => lastSeen(b) - lastSeen(a))
+  return livePool(readSessionStates(), now)
     .slice(0, 6)
     .map(s => ({
-      folder: s.cwd ? path.basename(String(s.cwd).replace(/[\/]+$/, '')) : null,
+      folder: projectName(s.cwd),
       branch: s.cwd ? gitBranch(s.cwd) : null,
       mood: sessionMood(s, now),
       age: now - lastSeen(s),
@@ -324,6 +378,13 @@ function pushState() {
   const state = aggregate();
   win.webContents.send('juna-state', state);
   pinned = !!loadConfig().pinned;   // refreshed once a second, not per frame
+  if (TRACE) {
+    // report the pool whenever it changes, so what the tray would list can be
+    // checked without having to hover the pet to find out
+    const shape = sessionSummaries()
+      .map(x => `${x.folder || '?'}${x.branch ? '@' + x.branch : ''}:${x.mood}`).join(',');
+    if (shape !== lastTracedShape) { lastTracedShape = shape; trace(`pool [${shape}]`); }
+  }
 
   // A pet the hook started retires with the last session. One launched from
   // autostart or by hand is the user's and never self-exits. The 60s floor
