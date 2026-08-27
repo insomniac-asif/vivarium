@@ -1,25 +1,44 @@
 # Bring a session's window to the front by process id.
-# WScript.Shell's AppActivate fails silently against Windows' foreground lock,
-# so restore the window and satisfy the lock before setting foreground.
+#
+# Windows only lets the foreground process hand focus away, so a background
+# helper (which is what the overlay spawns) is refused by both AppActivate and
+# a bare SetForegroundWindow. Attaching to the current foreground thread's
+# input queue puts this call inside that permission, which is the standard
+# way to make focus transfer reliable.
 param([int]$TargetPid)
+
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 public class Fg {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint from, uint to, bool attach);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
-  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
+  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
-  [DllImport("user32.dll")] public static extern void SwitchToThisWindow(IntPtr h, bool alt);
-  [DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, uint f, UIntPtr e);
+  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
 }
 "@
+
 $proc = Get-Process -Id $TargetPid -ErrorAction SilentlyContinue
 if (-not $proc) { exit 1 }
-$h = $proc.MainWindowHandle
-if ($h -eq [IntPtr]::Zero) { exit 1 }
-if ([Fg]::IsIconic($h)) { [void][Fg]::ShowWindow($h, 9) }   # SW_RESTORE
-# a synthetic ALT tap releases the foreground lock for this call
-[Fg]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)
-[Fg]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
-[void][Fg]::SetForegroundWindow($h)
-[Fg]::SwitchToThisWindow($h, $true)
+$target = $proc.MainWindowHandle
+if ($target -eq [IntPtr]::Zero) { exit 1 }
+
+if ([Fg]::IsIconic($target)) { [void][Fg]::ShowWindow($target, 9) }   # SW_RESTORE
+
+$fg = [Fg]::GetForegroundWindow()
+$fgPid = 0
+$fgThread = [Fg]::GetWindowThreadProcessId($fg, [ref]$fgPid)
+$me = [Fg]::GetCurrentThreadId()
+
+$attached = $false
+if ($fgThread -ne 0 -and $fgThread -ne $me) {
+  $attached = [Fg]::AttachThreadInput($me, $fgThread, $true)
+}
+[void][Fg]::BringWindowToTop($target)
+[void][Fg]::SetForegroundWindow($target)
+if ($attached) { [void][Fg]::AttachThreadInput($me, $fgThread, $false) }
+exit 0

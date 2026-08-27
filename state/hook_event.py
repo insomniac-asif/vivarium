@@ -51,7 +51,11 @@ def record(data):
         state.pop("ended_ts", None)   # resumed or still going
     if data.get("cwd"):
         state["cwd"] = data["cwd"]
-    if evt == "SessionStart":
+    # Record the window this session lives in. On SessionStart always, and on
+    # a later event if it is still missing, so a session that predates this
+    # feature (or whose ancestry walk failed once) heals itself instead of
+    # staying unclickable forever.
+    if evt == "SessionStart" or not state.get("host_pid"):
         host = find_host_window_pid()
         if host:
             state["host_pid"] = host
