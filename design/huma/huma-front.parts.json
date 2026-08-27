@@ -1,0 +1,9 @@
+{
+  "_comment": "Puppet map for the front-facing Huma hero. Coordinates are fractions of the cutout box; cx/cy/rx/ry is the limb's soft region, px/py its pivot (the joint it swings from).",
+  "wingL": {"cx": 0.115, "cy": 0.600, "rx": 0.135, "ry": 0.185, "px": 0.270, "py": 0.545},
+  "wingR": {"cx": 0.885, "cy": 0.600, "rx": 0.135, "ry": 0.185, "px": 0.730, "py": 0.545},
+  "crest": {"cx": 0.500, "cy": 0.105, "rx": 0.300, "ry": 0.120, "px": 0.500, "py": 0.290},
+  "clawL": {"cx": 0.330, "cy": 0.835, "rx": 0.100, "ry": 0.090, "px": 0.360, "py": 0.735},
+  "clawR": {"cx": 0.605, "cy": 0.835, "rx": 0.100, "ry": 0.090, "px": 0.575, "py": 0.735},
+  "tail":  {"cx": 0.900, "cy": 0.870, "rx": 0.110, "ry": 0.085, "px": 0.780, "py": 0.875}
+}

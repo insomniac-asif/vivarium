@@ -17,6 +17,7 @@ its attention. For per-limb posing, generate those rows with a
 reference-capable model and drop them in over these.
 """
 import argparse
+import json
 import math
 import os
 from collections import deque
@@ -78,6 +79,14 @@ def knock_out(im, tol=60):
         else:
             row_bg.append(tuple((lm[i] + rm[i]) // 2 for i in range(3)))
 
+    # The keying tolerance must follow the BACKDROP'S OWN UNIFORMITY, not a
+    # fixed multiplier. A smooth studio sweep varies a lot and needs a wide
+    # tolerance; a flat backdrop varies by a few units, and a wide tolerance
+    # there eats a subject painted in a similar value. Measured: on a flat
+    # grey plate this render's skull sits 35 from the backdrop while the
+    # backdrop itself varies by ~6, so a fixed 66 removed the pet's head.
+    key_tol = max(18.0, min(spread * 2.5 + 10.0, tol * 1.1))
+
     near = bytearray(w * h)
     for y in range(h):
         row = y * w
@@ -97,7 +106,7 @@ def knock_out(im, tol=60):
             # the pet as a slab. Measured on this render: floor sits 66-91 away
             # from its row's backdrop while the subject sits 164+, so the
             # bottom band gets a wider tolerance that lands safely between.
-            limit = tol * (2.0 if y > h * 0.78 else 1.1)
+            limit = key_tol * (1.8 if y > h * 0.78 else 1.0)
             if d2 < limit ** 2:
                 near[row + x] = 1
 
@@ -133,6 +142,7 @@ def knock_out(im, tol=60):
     # areas; a median pass removes them (and stray single-pixel specks)
     # without rounding off the silhouette the way a dilate would
     mask = mask.filter(ImageFilter.MedianFilter(5))
+    mask = bridge_interior_gaps(mask)
     mask = mask.filter(ImageFilter.GaussianBlur(0.6))
 
     out = im.convert("RGBA")
@@ -148,14 +158,56 @@ def knock_out(im, tol=60):
             else:
                 o[x, y] = (r, g, b_, av)
 
-    out = drop_trapped_backdrop(out, row_bg, bg, tol)
+    out = drop_trapped_backdrop(out, row_bg, bg, key_tol)
     out = largest_piece(out)
     out = fill_speckle_holes(out)
     box = out.getbbox()
     return out.crop(box) if box else out
 
 
-def drop_trapped_backdrop(img, row_bg, bg, tol, min_blob=260):
+def bridge_interior_gaps(mask, kernel=17):
+    """Re-attach detail the key drained out through a narrow channel.
+
+    Where a subject's own shading matches the backdrop exactly — the shadowed
+    grooves between scales on a grey creature lit on a grey plate — no colour
+    threshold can tell them apart, and they leak to the outside through gaps
+    (between horns, under a wing), taking the surface with them. Closing the
+    mask bridges those channels, but a plain close also re-admits real
+    backdrop; so keep only the bridged pixels that do NOT touch the frame
+    edge, which is exactly the interior detail and never the outer plate.
+    """
+    w, h = mask.size
+    closed = mask.filter(ImageFilter.MaxFilter(kernel)).filter(ImageFilter.MinFilter(kernel))
+    added = ImageChops.subtract(closed, mask)
+    a = added.load()
+    seen = bytearray(w * h)
+    keep = []
+    for start in range(w * h):
+        sx, sy = start % w, start // w
+        if seen[start] or a[sx, sy] < 128:
+            continue
+        q = deque([start]); seen[start] = 1
+        blob = [start]; touches_edge = False
+        while q:
+            i = q.popleft(); x, y = i % w, i // w
+            if x == 0 or y == 0 or x == w - 1 or y == h - 1:
+                touches_edge = True
+            for nx, ny in ((x-1, y), (x+1, y), (x, y-1), (x, y+1)):
+                if 0 <= nx < w and 0 <= ny < h:
+                    n = ny * w + nx
+                    if not seen[n] and a[nx, ny] >= 128:
+                        seen[n] = 1; q.append(n); blob.append(n)
+        if not touches_edge:
+            keep.extend(blob)
+    if not keep:
+        return mask
+    m = mask.load()
+    for i in keep:
+        m[i % w, i // w] = 255
+    return mask
+
+
+def drop_trapped_backdrop(img, row_bg, bg, key_tol, min_blob=260):
     """Clear backdrop that survived inside the silhouette — the gap between a
     tail and a leg, or a pocket re-admitted when the mask was closed.
 
@@ -173,7 +225,7 @@ def drop_trapped_backdrop(img, row_bg, bg, tol, min_blob=260):
         ref = row_bg[y] if row_bg[y] is not None else bg
         # same tolerance as the keying pass: a wider one here re-eats the
         # glow halo and detaches the crest all over again
-        return sum((c[i] - ref[i]) ** 2 for i in range(3)) < (tol * 1.1) ** 2
+        return sum((c[i] - ref[i]) ** 2 for i in range(3)) < key_tol ** 2
 
     seen = bytearray(w * h)
     for start in range(w * h):
@@ -194,14 +246,24 @@ def drop_trapped_backdrop(img, row_bg, bg, tol, min_blob=260):
     return img
 
 
-def fill_speckle_holes(img, max_hole=420):
-    """Close pinholes inside the silhouette.
+def fill_speckle_holes(img, max_hole=None):
+    """Close holes inside the silhouette.
 
-    Keying a glow halo leaves scattered transparent specks across textured
-    areas (the skull under a flame crest). Any small transparent region that
-    is fully enclosed by the subject is a hole, not background.
+    Two things punch holes in a keyed subject: a glow halo leaves pinpricks
+    across textured areas, and — worse — shading that matches the backdrop
+    exactly (the shadowed grooves between scales on a grey creature lit on a
+    grey plate) keys away wholesale, hollowing out the surface. Anything
+    transparent that is fully ENCLOSED by the subject is a hole, not
+    backdrop, however large: measured on this render, a 420px cap left the
+    pet's forehead full of gaps, while a cap proportional to the subject
+    restored it.
     """
     w, h = img.size
+    if max_hole is None:
+        a0 = img.getchannel("A").load()
+        opaque = sum(1 for y in range(0, h, 3) for x in range(0, w, 3)
+                     if a0[x, y] > 8) * 9
+        max_hole = max(600, int(opaque * 0.03))
     a = img.getchannel("A").load()
     seen = bytearray(w * h)
     q = deque()
@@ -416,6 +478,18 @@ def pose_parts(img, angles, masks):
 
 
 # ------------------------------------------------------------- choreography --
+def sym(**kw):
+    """Mirror a wing/claw angle onto both sides for a front-facing pet."""
+    out = dict(kw)
+    if "wing" in out:
+        v = out.pop("wing")
+        out["wingL"], out["wingR"] = v, -v
+    if "claw" in out:
+        v = out.pop("claw")
+        out["clawL"], out["clawR"] = -v * 0.35, v
+    return out
+
+
 def recipes():
     """state -> per-frame kwargs. Frame counts follow the v2 contract.
     Amplitudes are deliberately generous: at 192px, timid motion reads as a
@@ -426,17 +500,17 @@ def recipes():
     # and tail settle a beat behind the body so nothing moves as one board
     r["idle"] = [
         dict(sy=1.000, sx=1.000, dy=0, lean=1.5, glow=0.86,
-             parts=dict(wing=-2, tail=1, crest=1)),
+             parts=sym(wing=-2, tail=1, crest=1)),
         dict(sy=1.014, sx=0.994, dy=-2, lean=4.0, glow=0.92,
-             parts=dict(wing=-5, tail=2, crest=2)),
+             parts=sym(wing=-5, tail=2, crest=2)),
         dict(sy=1.026, sx=0.988, dy=-4, lean=5.5, glow=0.99,
-             parts=dict(wing=-7, tail=3, crest=3)),
+             parts=sym(wing=-7, tail=3, crest=3)),
         dict(sy=1.022, sx=0.990, dy=-4, lean=2.0, glow=1.02,
-             parts=dict(wing=-5, tail=2, crest=2)),
+             parts=sym(wing=-5, tail=2, crest=2)),
         dict(sy=1.010, sx=0.996, dy=-2, lean=-2.5, glow=0.94,
-             parts=dict(wing=-1, tail=-1, crest=0)),
+             parts=sym(wing=-1, tail=-1, crest=0)),
         dict(sy=0.992, sx=1.010, dy=1, lean=-4.5, glow=0.86,
-             parts=dict(wing=2, tail=-2, crest=-1)),
+             parts=sym(wing=2, tail=-2, crest=-1)),
     ]
 
     # running-right — bounding hop; the body trails the leap, then whips forward
@@ -447,7 +521,7 @@ def recipes():
         dict(lean=trail[i], rot=-3 - hop[i] * 0.15, dy=hop[i],
              dx=(1 if i % 2 else -1) * 2,
              sy=1.0 - hop[i] * 0.006, sx=1.0 + hop[i] * 0.004, glow=1.06,
-             parts=dict(wing=beat[i], tail=-beat[i] * 0.25, claw=beat[i] * 0.3))
+             parts=sym(wing=beat[i], tail=-beat[i] * 0.25, claw=beat[i] * 0.3))
         for i in range(8)
     ]
     r["running-left"] = [dict(f, flip=True, rot=-f["rot"], lean=-f["lean"],
@@ -456,27 +530,27 @@ def recipes():
     # waving — rock back hard, overshoot forward, settle
     r["waving"] = [
         dict(lean=-9, rot=-4, dy=-4, sy=1.03, sx=0.98, glow=1.12,
-             parts=dict(claw=34, wing=-10, crest=3)),
+             parts=sym(claw=34, wing=-10, crest=3)),
         dict(lean=-19, rot=-8, dy=-12, sy=1.07, sx=0.95, glow=1.26,
-             parts=dict(claw=62, wing=-20, crest=6, tail=4)),
+             parts=sym(claw=62, wing=-20, crest=6, tail=4)),
         dict(lean=7, rot=3, dy=-4, sy=1.00, sx=1.02, glow=1.14,
-             parts=dict(claw=38, wing=-6, crest=2)),
+             parts=sym(claw=38, wing=-6, crest=2)),
         dict(lean=-2, rot=0, dy=0, sy=1.00, sx=1.00, glow=1.02,
-             parts=dict(claw=6, wing=0, crest=0)),
+             parts=sym(claw=6, wing=0, crest=0)),
     ]
 
     # jumping — deep anticipation, stretched launch, floating peak, land squash
     r["jumping"] = [
         dict(sy=0.84, sx=1.15, dy=5, lean=2, glow=0.98,
-             parts=dict(wing=10, claw=-8, tail=6)),
+             parts=sym(wing=10, claw=-8, tail=6)),
         dict(sy=1.17, sx=0.89, dy=-20, lean=-5, glow=1.18,
-             parts=dict(wing=-26, claw=16, tail=-8, crest=5)),
+             parts=sym(wing=-26, claw=16, tail=-8, crest=5)),
         dict(sy=1.07, sx=0.96, dy=-36, lean=4, rot=-4, glow=1.30,
-             parts=dict(wing=-34, claw=20, tail=-12, crest=7)),
+             parts=sym(wing=-34, claw=20, tail=-12, crest=7)),
         dict(sy=1.01, sx=1.00, dy=-15, lean=9, rot=5, glow=1.10,
-             parts=dict(wing=-14, claw=10, tail=-4)),
+             parts=sym(wing=-14, claw=10, tail=-4)),
         dict(sy=0.87, sx=1.12, dy=3, lean=-4, glow=0.96,
-             parts=dict(wing=8, claw=-6, tail=5)),
+             parts=sym(wing=8, claw=-6, tail=5)),
     ]
 
     # failed — slump sideways, buckle, flatten into a mound, embers dying
@@ -493,22 +567,22 @@ def recipes():
 
     # waiting — cranes up at you, embers pulsing like held breath
     r["waiting"] = [
-        dict(lean=-6, rot=-2, dy=-3, sy=1.02, glow=1.00, parts=dict(wing=-4, claw=8)),
-        dict(lean=-12, rot=-4, dy=-7, sy=1.05, glow=1.20, parts=dict(wing=-10, claw=16, crest=3)),
-        dict(lean=-14, rot=-5, dy=-9, sy=1.06, glow=1.30, parts=dict(wing=-13, claw=20, crest=4)),
-        dict(lean=-12, rot=-4, dy=-7, sy=1.05, glow=1.16, parts=dict(wing=-9, claw=14, crest=2)),
-        dict(lean=-9, rot=-3, dy=-4, sy=1.03, glow=1.00, parts=dict(wing=-4, claw=8)),
-        dict(lean=-6, rot=-2, dy=-2, sy=1.01, glow=0.90, parts=dict(wing=-1, claw=3)),
+        dict(lean=-6, rot=-2, dy=-3, sy=1.02, glow=1.00, parts=sym(wing=-4, claw=8)),
+        dict(lean=-12, rot=-4, dy=-7, sy=1.05, glow=1.20, parts=sym(wing=-10, claw=16, crest=3)),
+        dict(lean=-14, rot=-5, dy=-9, sy=1.06, glow=1.30, parts=sym(wing=-13, claw=20, crest=4)),
+        dict(lean=-12, rot=-4, dy=-7, sy=1.05, glow=1.16, parts=sym(wing=-9, claw=14, crest=2)),
+        dict(lean=-9, rot=-3, dy=-4, sy=1.03, glow=1.00, parts=sym(wing=-4, claw=8)),
+        dict(lean=-6, rot=-2, dy=-2, sy=1.01, glow=0.90, parts=sym(wing=-1, claw=3)),
     ]
 
     # running (work) — hunched into the task, fast bob, embers at full blaze
     r["running"] = [
-        dict(lean=9, rot=3, dy=0, sy=0.98, sx=1.02, glow=1.30, parts=dict(claw=14, wing=-3)),
-        dict(lean=13, rot=4, dy=-5, sy=1.02, sx=0.99, glow=1.42, parts=dict(claw=-6, wing=-6, tail=3)),
-        dict(lean=10, rot=3, dy=-1, sy=0.99, sx=1.01, glow=1.34, parts=dict(claw=12, wing=-2)),
-        dict(lean=15, rot=5, dy=-6, sy=1.03, sx=0.98, glow=1.46, parts=dict(claw=-8, wing=-7, tail=4)),
-        dict(lean=11, rot=3, dy=-2, sy=0.99, sx=1.01, glow=1.32, parts=dict(claw=10, wing=-2)),
-        dict(lean=8, rot=2, dy=0, sy=0.97, sx=1.02, glow=1.24, parts=dict(claw=-4, wing=0)),
+        dict(lean=9, rot=3, dy=0, sy=0.98, sx=1.02, glow=1.30, parts=sym(claw=14, wing=-3)),
+        dict(lean=13, rot=4, dy=-5, sy=1.02, sx=0.99, glow=1.42, parts=sym(claw=-6, wing=-6, tail=3)),
+        dict(lean=10, rot=3, dy=-1, sy=0.99, sx=1.01, glow=1.34, parts=sym(claw=12, wing=-2)),
+        dict(lean=15, rot=5, dy=-6, sy=1.03, sx=0.98, glow=1.46, parts=sym(claw=-8, wing=-7, tail=4)),
+        dict(lean=11, rot=3, dy=-2, sy=0.99, sx=1.01, glow=1.32, parts=sym(claw=10, wing=-2)),
+        dict(lean=8, rot=2, dy=0, sy=0.97, sx=1.02, glow=1.24, parts=sym(claw=-4, wing=0)),
     ]
 
     # review — bows over the finished work, small considering shifts
@@ -535,7 +609,7 @@ def look_recipe(deg):
                 sy=1.0 + vert * 0.030,
                 sx=1.0 - abs(horiz) * 0.025,
                 glow=1.0 + vert * 0.06,
-                parts=dict(crest=vert * 5.0, tail=-horiz * 6.0,
+                parts=sym(crest=vert * 5.0, tail=-horiz * 6.0,
                            wing=-abs(horiz) * 4.0))
 
 
@@ -545,7 +619,16 @@ def main():
     ap.add_argument("--output-dir", required=True)
     ap.add_argument("--chroma-tol", type=int, default=60)
     ap.add_argument("--anchor-height", type=int, default=168)
+    ap.add_argument("--parts", help="JSON puppet map for this character; the "
+                                    "built-in map fits the side-on hero only")
     args = ap.parse_args()
+
+    if args.parts:
+        with open(args.parts, encoding="utf-8") as f:
+            loaded = json.load(f)
+        PARTS.clear()
+        PARTS.update({k: v for k, v in loaded.items() if not k.startswith("_")})
+        print(f"puppet map: {', '.join(PARTS)}")
 
     cut = knock_out(Image.open(args.render), args.chroma_tol)
     k = min(args.anchor_height / cut.height, (CELL_W - 26) / cut.width)
