@@ -3,6 +3,7 @@
 // in a transparent always-on-top window, driven by per-session state files
 // written by the Claude Code statusline heartbeat and hooks.
 const { app, BrowserWindow, Menu, ipcMain, screen } = require('electron');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -31,6 +32,10 @@ let lastCursor = null;
 let currentMood = 'idle';
 let liveSessions = 0;        // sessions active in the last 30 min
 let attentionIndex = -1;     // index of the session that needs input, or -1
+let focusPid = null;         // window to raise when the pet is clicked
+const FROM_HOOK = process.argv.includes('--from-hook');
+const bootedAt = Date.now();
+let emptySince = 0;
 let lastSessionStartTs = 0;
 let lastLookDir = -1;
 
@@ -51,6 +56,18 @@ function saveConfig(patch) {
 function defaultPosition() {
   const wa = screen.getPrimaryDisplay().workArea;
   return { x: wa.x + wa.width - WIN_W - 24, y: wa.y + wa.height - WIN_H - 8 };
+}
+
+function clampToWorkArea() {
+  if (!win || win.isDestroyed()) return;
+  const b = win.getBounds();
+  const wa = screen.getDisplayNearestPoint({ x: b.x + b.width / 2, y: b.y + b.height / 2 }).workArea;
+  const x = Math.max(wa.x, Math.min(wa.x + wa.width - WIN_W, b.x));
+  const y = Math.max(wa.y, Math.min(wa.y + wa.height - WIN_H, b.y));
+  if (x !== b.x || y !== b.y) {
+    win.setPosition(Math.round(x), Math.round(y));
+    saveConfig({ x: Math.round(x), y: Math.round(y) });
+  }
 }
 
 // ---- pet discovery --------------------------------------------------------
@@ -170,6 +187,12 @@ function aggregate() {
   const live = states.filter(s => isLive(s, now));
   liveSessions = live.length;
   attentionIndex = live.findIndex(s => sessionMood(s, now) === 'needs_you');
+  // clicking the pet should return you to the session it is speaking for:
+  // whoever needs you, else whoever ran most recently
+  const speaking = attentionIndex >= 0
+    ? live[attentionIndex]
+    : live.slice().sort((a, b) => lastSeen(b) - lastSeen(a))[0];
+  focusPid = speaking && speaking.host_pid ? speaking.host_pid : null;
 
   const hour = new Date().getHours();
   currentMood = mood;
@@ -184,7 +207,22 @@ function aggregate() {
 }
 
 function pushState() {
-  if (win && !win.isDestroyed()) win.webContents.send('juna-state', aggregate());
+  if (!win || win.isDestroyed()) return;
+  const state = aggregate();
+  win.webContents.send('juna-state', state);
+
+  // A pet the hook started retires with the last session. One launched from
+  // autostart or by hand is the user's and never self-exits. The 60s floor
+  // covers the gap before the first session writes its state, and an
+  // unreadable state dir must never be read as "no sessions".
+  if (!FROM_HOOK || loadConfig().persist) return;
+  if (Date.now() - bootedAt < 60000) return;
+  let readable = true;
+  try { fs.readdirSync(STATE_DIR); } catch { readable = false; }
+  if (!readable) { emptySince = 0; return; }
+  if (liveSessions > 0) { emptySince = 0; return; }
+  if (!emptySince) emptySince = Date.now();
+  else if (Date.now() - emptySince > 90000) app.quit();
 }
 
 // ---- look direction (cursor following, idle only) -------------------------
@@ -331,6 +369,9 @@ function createWindow() {
   });
   win.setAlwaysOnTop(true, 'screen-saver');
   win.setMenu(null);
+  clampToWorkArea();
+  screen.on('display-removed', clampToWorkArea);
+  screen.on('display-metrics-changed', clampToWorkArea);
   // start transparent to clicks; the renderer reports when the cursor is
   // actually over opaque pixels and we take the mouse back just for those
   win.setIgnoreMouseEvents(true, { forward: true });
@@ -343,6 +384,21 @@ function createWindow() {
 // ---- drag (main follows cursor; reports direction for run animation) ------
 let dragStartPos = null;
 let dragMoved = 0;
+let pressStarted = 0;
+
+function raiseSession() {
+  // Codex's pet is a launcher: clicking it returns you to what it represents.
+  if (!focusPid) return;
+  if (process.platform === 'win32') {
+    try {
+      spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+                           path.join(__dirname, 'activate.ps1'), String(focusPid)],
+            { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+    } catch {}
+  }
+  // the pet must not hold focus it just handed away
+  if (win && !win.isDestroyed()) win.blur();
+}
 
 ipcMain.on('drag-start', () => {
   if (dragTimer || !win) return;
@@ -354,6 +410,7 @@ ipcMain.on('drag-start', () => {
   lastCursor = start;
   dragStartPos = start;
   dragMoved = 0;
+  pressStarted = Date.now();
   win.webContents.send('juna-state', { dragging: true });
   dragTimer = setInterval(() => {
     if (!win || win.isDestroyed()) return;
@@ -369,13 +426,24 @@ ipcMain.on('drag-end', () => {
   dragging = false;
   if (dragTimer) { clearInterval(dragTimer); dragTimer = null; }
   if (win && !win.isDestroyed()) {
+    clampToWorkArea();
     const [x, y] = win.getPosition();
     saveConfig({ x, y });
     motion.targetX = null;
     motion.dwellUntil = Date.now() + DWELL_MAX;
-    // a press that never moved is a pet, not a drag
-    const petted = dragMoved < 4;
-    win.webContents.send('juna-state', petted ? { dragging: false, event: 'Petted' } : { dragging: false });
+    // Three gestures, distinguished by distance then duration:
+    //   moved       -> a drag (already handled while moving)
+    //   quick tap   -> launcher: raise the session's window
+    //   press+hold  -> petting
+    const held = Date.now() - pressStarted;
+    if (dragMoved >= 4) {
+      win.webContents.send('juna-state', { dragging: false });
+    } else if (held < 450) {
+      win.webContents.send('juna-state', { dragging: false });
+      raiseSession();
+    } else {
+      win.webContents.send('juna-state', { dragging: false, event: 'Petted' });
+    }
   }
 });
 
@@ -414,6 +482,8 @@ ipcMain.on('context-menu', () => {
     { type: 'separator' },
     { label: 'Reset position', click: () => { const p = defaultPosition(); win.setPosition(p.x, p.y); saveConfig({ x: p.x, y: p.y }); } },
     { label: 'Start with Windows', type: 'checkbox', checked: autostartEnabled(), click: (item) => setAutostart(item.checked) },
+    { label: 'Stay open after the last session', type: 'checkbox',
+      checked: !!loadConfig().persist, click: (item) => saveConfig({ persist: item.checked }) },
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },
   ]);

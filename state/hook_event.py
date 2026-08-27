@@ -51,10 +51,101 @@ def record(data):
         state.pop("ended_ts", None)   # resumed or still going
     if data.get("cwd"):
         state["cwd"] = data["cwd"]
+    if evt == "SessionStart":
+        host = find_host_window_pid()
+        if host:
+            state["host_pid"] = host
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f)
     os.replace(tmp, path)
+
+
+def _proc_parents():
+    """pid -> (ppid, name) for every process. Windows via toolhelp, POSIX via
+    /proc. Returns {} if unavailable — callers must tolerate that."""
+    out = {}
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class ENTRY(ctypes.Structure):
+                _fields_ = [("dwSize", wintypes.DWORD),
+                            ("cntUsage", wintypes.DWORD),
+                            ("th32ProcessID", wintypes.DWORD),
+                            ("th32DefaultHeapID", ctypes.POINTER(ctypes.c_ulong)),
+                            ("th32ModuleID", wintypes.DWORD),
+                            ("cntThreads", wintypes.DWORD),
+                            ("th32ParentProcessID", wintypes.DWORD),
+                            ("pcPriClassBase", ctypes.c_long),
+                            ("dwFlags", wintypes.DWORD),
+                            ("szExeFile", ctypes.c_char * 260)]
+
+            k32 = ctypes.windll.kernel32
+            snap = k32.CreateToolhelp32Snapshot(0x2, 0)      # TH32CS_SNAPPROCESS
+            if snap == -1:
+                return out
+            e = ENTRY(); e.dwSize = ctypes.sizeof(ENTRY)
+            ok = k32.Process32First(snap, ctypes.byref(e))
+            while ok:
+                out[int(e.th32ProcessID)] = (
+                    int(e.th32ParentProcessID),
+                    e.szExeFile.decode("utf-8", "replace").lower())
+                ok = k32.Process32Next(snap, ctypes.byref(e))
+            k32.CloseHandle(snap)
+        except Exception:
+            pass
+    else:
+        try:
+            for name in os.listdir("/proc"):
+                if not name.isdigit():
+                    continue
+                try:
+                    with open(f"/proc/{name}/stat", encoding="utf-8") as f:
+                        parts = f.read().rsplit(") ", 1)[1].split()
+                    with open(f"/proc/{name}/comm", encoding="utf-8") as f:
+                        comm = f.read().strip().lower()
+                    out[int(name)] = (int(parts[1]), comm)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+    return out
+
+
+# processes that merely relay the hook, never the window the user looks at
+_RELAY = ("python", "python3", "py", "node", "bun", "bash", "sh", "zsh",
+          "conhost", "cmd")
+
+
+def find_host_window_pid():
+    """Walk up from this hook to the first ancestor that plausibly owns a
+    visible window — the terminal or IDE the session is running in. That is
+    what clicking the pet should bring to the front."""
+    table = _proc_parents()
+    if not table:
+        return None
+    # Collect every app-like ancestor, then take the OUTERMOST one: an app can
+    # spawn helper processes of its own name (a desktop app's UI process is the
+    # outer one), and only the outer process owns the visible window.
+    candidates = []
+    pid = os.getpid()
+    for _ in range(14):
+        entry = table.get(pid)
+        if not entry:
+            break
+        ppid, _name = entry
+        parent = table.get(ppid)
+        if not parent:
+            break
+        stem = parent[1].rsplit(".", 1)[0]
+        if "explorer" in stem or stem in ("services", "wininit", "systemd", "init"):
+            break
+        if stem not in _RELAY:
+            candidates.append(ppid)
+        pid = ppid
+    return candidates[-1] if candidates else None
 
 
 def ensure_overlay():
@@ -85,7 +176,7 @@ def ensure_overlay():
         kwargs["creationflags"] = 0x00000008 | 0x08000000
     else:
         kwargs["start_new_session"] = True
-    subprocess.Popen([exe, overlay], **kwargs)
+    subprocess.Popen([exe, overlay, "--from-hook"], **kwargs)
 
 
 def main():

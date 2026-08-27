@@ -29,6 +29,20 @@ What the ecosystem does, and what Vivarium implements.
   embers for ~1.2s.
 - **Drag**: directional — the pet plays running-left/right by drag direction
   while following the cursor.
+- **Click = launcher** (Codex's actual behaviour): a quick tap raises the
+  window of the session the pet is speaking for — whoever needs input, else
+  whoever ran most recently. Each session records its host window at
+  SessionStart by walking its own process ancestry.
+- **Press and hold** (>450ms) pets instead of launching, so the two gestures
+  never collide.
+- **Spawns with Claude**: a SessionStart hook starts the overlay if it is not
+  already running (liveness via a beacon file the overlay refreshes, so it is
+  never duplicated). A pet the hook started retires ~90s after the last
+  session ends; one you launched yourself, or via autostart, stays until you
+  quit it. "Stay open after the last session" pins it either way.
+- **Click-through**: the window is transparent to the mouse except over
+  actual pet pixels, so a wandering pet never eats a click meant for what is
+  underneath it.
 - **State mapping** (aggregated across all sessions):
   needs_you (waiting) > working (running) > done (wave one-shot) > idle >
   asleep; SessionStart plays a jump. `failed` and `review` render but have no
@@ -37,6 +51,8 @@ What the ecosystem does, and what Vivarium implements.
 
 ## Not implemented (deliberately, for now)
 
-- Click-as-launcher (vivarium isn't bound to one app window).
+- Per-session pets. One pet aggregates every session and counts them with
+  dots; N transparent always-on-top windows costs far more than it adds.
 - Feeding/XP/evolution retention mechanics.
 - Sounds and speech bubbles (voice work is parked).
+- Vertical movement: the v2 atlas has no vertical locomotion rows.
