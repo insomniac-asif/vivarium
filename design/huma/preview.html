@@ -1,0 +1,364 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+ body { margin:0; background:#0e0e12; display:flex; gap:40px; align-items:center;
+        justify-content:center; height:100vh; font:12px system-ui; color:#8a8a92 }
+ .col { display:flex; flex-direction:column; align-items:center; gap:10px }
+</style></head><body>
+<div class="col"><svg viewBox="0 0 200 200" width="440" height="440">
+  <defs>
+    <radialGradient id="headG" cx="0.34" cy="0.24" r="0.82">
+      <stop offset="0" stop-color="#474754"/><stop offset="0.5" stop-color="#2b2b34"/>
+      <stop offset="1" stop-color="#15151a"/>
+    </radialGradient>
+    <radialGradient id="bodyG" cx="0.36" cy="0.26" r="0.85">
+      <stop offset="0" stop-color="#3c3c48"/><stop offset="0.55" stop-color="#24242c"/>
+      <stop offset="1" stop-color="#131318"/>
+    </radialGradient>
+    <radialGradient id="bellyG" cx="0.5" cy="0.32" r="0.72">
+      <stop offset="0" stop-color="#5c5c69"/><stop offset="1" stop-color="#3a3a45"/>
+    </radialGradient>
+    <radialGradient id="irisG" cx="0.38" cy="0.32" r="0.78">
+      <stop offset="0" stop-color="#fff1cf"/><stop offset="0.28" stop-color="#ffb648"/>
+      <stop offset="0.68" stop-color="#ff6a1e"/><stop offset="1" stop-color="#b8260f"/>
+    </radialGradient>
+    <radialGradient id="gemG" cx="0.38" cy="0.28" r="0.8">
+      <stop offset="0" stop-color="#fff2d6"/><stop offset="0.42" stop-color="#ff9430"/>
+      <stop offset="1" stop-color="#c9260f"/>
+    </radialGradient>
+    <linearGradient id="hornG" x1="0" y1="1" x2="0.3" y2="0">
+      <stop offset="0" stop-color="#1a1a1f"/><stop offset="1" stop-color="#4a4a57"/>
+    </linearGradient>
+    <filter id="emberGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="2.6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="eyeGlow" x="-70%" y="-70%" width="240%" height="240%">
+      <feGaussianBlur stdDeviation="2.2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- ground contact shadow -->
+  <ellipse id="shadow" cx="100" cy="187" rx="43" ry="6.5" fill="#000" opacity="0.34"/>
+
+  <!-- tail: short, curled, ember tip -->
+  <g id="tail">
+    <path d="M138 150 C158 150 168 138 165 126 C163 118 155 115 149 119 C155 124 154 133 145 137 C141 139 139 144 138 150 Z" fill="#1c1c22"/>
+    <path d="M149 119 C151 112 157 108 163 110 C160 115 159 121 160 125 C155 124 151 122 149 119 Z" fill="#ff6a1e" filter="url(#emberGlow)" opacity="0.95"/>
+  </g>
+
+  <!-- hind legs -->
+  <g id="legs">
+    <ellipse cx="76" cy="172" rx="17" ry="12" fill="#1e1e25"/>
+    <ellipse cx="124" cy="172" rx="17" ry="12" fill="#1e1e25"/>
+    <g fill="#0e0e12">
+      <circle cx="67" cy="176" r="2.1"/><circle cx="74" cy="178" r="2.1"/><circle cx="81" cy="177" r="2.1"/>
+      <circle cx="119" cy="177" r="2.1"/><circle cx="126" cy="178" r="2.1"/><circle cx="133" cy="176" r="2.1"/>
+    </g>
+  </g>
+
+  <!-- body -->
+  <g id="body">
+    <ellipse cx="100" cy="145" rx="41" ry="34" fill="url(#bodyG)"/>
+    <ellipse cx="100" cy="152" rx="25" ry="23" fill="url(#bellyG)" opacity="0.92"/>
+    <path d="M64 130 C72 118 92 112 104 114" fill="none" stroke="#5a5a68" stroke-width="2.6"
+          stroke-linecap="round" opacity="0.32"/>
+    <g id="bodyEmber" filter="url(#emberGlow)">
+      <path d="M126 130 C132 137 131 146 126 153" fill="none" stroke="#ff5a1f" stroke-width="2.3" stroke-linecap="round"/>
+      <path d="M74 138 C70 144 71 151 75 156" fill="none" stroke="#ff5a1f" stroke-width="1.8" stroke-linecap="round" opacity="0.85"/>
+    </g>
+    <g id="gem" filter="url(#emberGlow)">
+      <path d="M100 122 L108 132 L100 142 L92 132 Z" fill="url(#gemG)"/>
+      <path d="M100 125 L104.5 132 L100 139 L95.5 132 Z" fill="#fff2d6" opacity="0.55"/>
+    </g>
+  </g>
+
+  <!-- arms -->
+  <g id="armL"><ellipse cx="63" cy="146" rx="11" ry="14" fill="#1c1c23" transform="rotate(-12 63 146)"/>
+    <g fill="#0e0e12"><circle cx="58" cy="157" r="2"/><circle cx="64" cy="159" r="2"/><circle cx="69" cy="157" r="2"/></g></g>
+  <g id="armR"><ellipse cx="137" cy="146" rx="11" ry="14" fill="#1c1c23" transform="rotate(12 137 146)"/>
+    <g fill="#0e0e12"><circle cx="131" cy="157" r="2"/><circle cx="137" cy="159" r="2"/><circle cx="142" cy="157" r="2"/></g></g>
+
+  <!-- head -->
+  <g id="head">
+    <g id="horns">
+      <path d="M66 46 C60 34 56 24 60 16 C68 22 74 32 76 42 Z" fill="url(#hornG)"/>
+      <path d="M134 46 C140 34 144 24 140 16 C132 22 126 32 124 42 Z" fill="url(#hornG)"/>
+    </g>
+    <g id="spines" filter="url(#emberGlow)" opacity="0.9">
+      <path d="M92 30 L96 18 L100 30 Z" fill="#ff6a1e"/>
+      <path d="M100 28 L104 14 L110 27 Z" fill="#ff8a2a"/>
+    </g>
+    <ellipse cx="100" cy="80" rx="53" ry="47" fill="url(#headG)"/>
+    <path d="M52 66 C60 46 82 36 100 36" fill="none" stroke="#63636f" stroke-width="3"
+          stroke-linecap="round" opacity="0.28"/>
+    <g id="headEmber" filter="url(#emberGlow)" opacity="0.9">
+      <path d="M141 66 C146 72 147 80 144 87" fill="none" stroke="#ff5a1f" stroke-width="1.9" stroke-linecap="round"/>
+    </g>
+
+    <!-- snout -->
+    <ellipse cx="100" cy="101" rx="19" ry="13" fill="#33333d"/>
+    <g fill="#101014"><ellipse cx="94" cy="97" rx="1.9" ry="1.4"/><ellipse cx="106" cy="97" rx="1.9" ry="1.4"/></g>
+    <path id="mouth" d="M91 106 C96 111 104 111 109 106" fill="none" stroke="#101014"
+          stroke-width="2.4" stroke-linecap="round"/>
+
+    <!-- eyes: the whole point -->
+    <g id="eyeL">
+      <ellipse cx="78" cy="79" rx="16" ry="18" fill="#0d0d11"/>
+      <ellipse cx="78" cy="79" rx="13" ry="15" fill="url(#irisG)" filter="url(#eyeGlow)"/>
+      <ellipse id="pupilL" cx="78" cy="80" rx="6" ry="8.5" fill="#12060a"/>
+      <circle cx="72.5" cy="72" r="5" fill="#fff" opacity="0.96"/>
+      <circle cx="83" cy="86" r="2.4" fill="#fff" opacity="0.75"/>
+    </g>
+    <g id="eyeR">
+      <ellipse cx="122" cy="79" rx="16" ry="18" fill="#0d0d11"/>
+      <ellipse cx="122" cy="79" rx="13" ry="15" fill="url(#irisG)" filter="url(#eyeGlow)"/>
+      <ellipse id="pupilR" cx="122" cy="80" rx="6" ry="8.5" fill="#12060a"/>
+      <circle cx="116.5" cy="72" r="5" fill="#fff" opacity="0.96"/>
+      <circle cx="127" cy="86" r="2.4" fill="#fff" opacity="0.75"/>
+    </g>
+    <g id="lids" opacity="0">
+      <ellipse cx="78" cy="70" rx="17" ry="14" fill="#2b2b34"/>
+      <ellipse cx="122" cy="70" rx="17" ry="14" fill="#2b2b34"/>
+    </g>
+  </g>
+</svg><div>hero</div></div>
+<div class="col"><svg viewBox="0 0 200 200" width="192" height="192">
+  <defs>
+    <radialGradient id="headG" cx="0.34" cy="0.24" r="0.82">
+      <stop offset="0" stop-color="#474754"/><stop offset="0.5" stop-color="#2b2b34"/>
+      <stop offset="1" stop-color="#15151a"/>
+    </radialGradient>
+    <radialGradient id="bodyG" cx="0.36" cy="0.26" r="0.85">
+      <stop offset="0" stop-color="#3c3c48"/><stop offset="0.55" stop-color="#24242c"/>
+      <stop offset="1" stop-color="#131318"/>
+    </radialGradient>
+    <radialGradient id="bellyG" cx="0.5" cy="0.32" r="0.72">
+      <stop offset="0" stop-color="#5c5c69"/><stop offset="1" stop-color="#3a3a45"/>
+    </radialGradient>
+    <radialGradient id="irisG" cx="0.38" cy="0.32" r="0.78">
+      <stop offset="0" stop-color="#fff1cf"/><stop offset="0.28" stop-color="#ffb648"/>
+      <stop offset="0.68" stop-color="#ff6a1e"/><stop offset="1" stop-color="#b8260f"/>
+    </radialGradient>
+    <radialGradient id="gemG" cx="0.38" cy="0.28" r="0.8">
+      <stop offset="0" stop-color="#fff2d6"/><stop offset="0.42" stop-color="#ff9430"/>
+      <stop offset="1" stop-color="#c9260f"/>
+    </radialGradient>
+    <linearGradient id="hornG" x1="0" y1="1" x2="0.3" y2="0">
+      <stop offset="0" stop-color="#1a1a1f"/><stop offset="1" stop-color="#4a4a57"/>
+    </linearGradient>
+    <filter id="emberGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="2.6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="eyeGlow" x="-70%" y="-70%" width="240%" height="240%">
+      <feGaussianBlur stdDeviation="2.2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- ground contact shadow -->
+  <ellipse id="shadow" cx="100" cy="187" rx="43" ry="6.5" fill="#000" opacity="0.34"/>
+
+  <!-- tail: short, curled, ember tip -->
+  <g id="tail">
+    <path d="M138 150 C158 150 168 138 165 126 C163 118 155 115 149 119 C155 124 154 133 145 137 C141 139 139 144 138 150 Z" fill="#1c1c22"/>
+    <path d="M149 119 C151 112 157 108 163 110 C160 115 159 121 160 125 C155 124 151 122 149 119 Z" fill="#ff6a1e" filter="url(#emberGlow)" opacity="0.95"/>
+  </g>
+
+  <!-- hind legs -->
+  <g id="legs">
+    <ellipse cx="76" cy="172" rx="17" ry="12" fill="#1e1e25"/>
+    <ellipse cx="124" cy="172" rx="17" ry="12" fill="#1e1e25"/>
+    <g fill="#0e0e12">
+      <circle cx="67" cy="176" r="2.1"/><circle cx="74" cy="178" r="2.1"/><circle cx="81" cy="177" r="2.1"/>
+      <circle cx="119" cy="177" r="2.1"/><circle cx="126" cy="178" r="2.1"/><circle cx="133" cy="176" r="2.1"/>
+    </g>
+  </g>
+
+  <!-- body -->
+  <g id="body">
+    <ellipse cx="100" cy="145" rx="41" ry="34" fill="url(#bodyG)"/>
+    <ellipse cx="100" cy="152" rx="25" ry="23" fill="url(#bellyG)" opacity="0.92"/>
+    <path d="M64 130 C72 118 92 112 104 114" fill="none" stroke="#5a5a68" stroke-width="2.6"
+          stroke-linecap="round" opacity="0.32"/>
+    <g id="bodyEmber" filter="url(#emberGlow)">
+      <path d="M126 130 C132 137 131 146 126 153" fill="none" stroke="#ff5a1f" stroke-width="2.3" stroke-linecap="round"/>
+      <path d="M74 138 C70 144 71 151 75 156" fill="none" stroke="#ff5a1f" stroke-width="1.8" stroke-linecap="round" opacity="0.85"/>
+    </g>
+    <g id="gem" filter="url(#emberGlow)">
+      <path d="M100 122 L108 132 L100 142 L92 132 Z" fill="url(#gemG)"/>
+      <path d="M100 125 L104.5 132 L100 139 L95.5 132 Z" fill="#fff2d6" opacity="0.55"/>
+    </g>
+  </g>
+
+  <!-- arms -->
+  <g id="armL"><ellipse cx="63" cy="146" rx="11" ry="14" fill="#1c1c23" transform="rotate(-12 63 146)"/>
+    <g fill="#0e0e12"><circle cx="58" cy="157" r="2"/><circle cx="64" cy="159" r="2"/><circle cx="69" cy="157" r="2"/></g></g>
+  <g id="armR"><ellipse cx="137" cy="146" rx="11" ry="14" fill="#1c1c23" transform="rotate(12 137 146)"/>
+    <g fill="#0e0e12"><circle cx="131" cy="157" r="2"/><circle cx="137" cy="159" r="2"/><circle cx="142" cy="157" r="2"/></g></g>
+
+  <!-- head -->
+  <g id="head">
+    <g id="horns">
+      <path d="M66 46 C60 34 56 24 60 16 C68 22 74 32 76 42 Z" fill="url(#hornG)"/>
+      <path d="M134 46 C140 34 144 24 140 16 C132 22 126 32 124 42 Z" fill="url(#hornG)"/>
+    </g>
+    <g id="spines" filter="url(#emberGlow)" opacity="0.9">
+      <path d="M92 30 L96 18 L100 30 Z" fill="#ff6a1e"/>
+      <path d="M100 28 L104 14 L110 27 Z" fill="#ff8a2a"/>
+    </g>
+    <ellipse cx="100" cy="80" rx="53" ry="47" fill="url(#headG)"/>
+    <path d="M52 66 C60 46 82 36 100 36" fill="none" stroke="#63636f" stroke-width="3"
+          stroke-linecap="round" opacity="0.28"/>
+    <g id="headEmber" filter="url(#emberGlow)" opacity="0.9">
+      <path d="M141 66 C146 72 147 80 144 87" fill="none" stroke="#ff5a1f" stroke-width="1.9" stroke-linecap="round"/>
+    </g>
+
+    <!-- snout -->
+    <ellipse cx="100" cy="101" rx="19" ry="13" fill="#33333d"/>
+    <g fill="#101014"><ellipse cx="94" cy="97" rx="1.9" ry="1.4"/><ellipse cx="106" cy="97" rx="1.9" ry="1.4"/></g>
+    <path id="mouth" d="M91 106 C96 111 104 111 109 106" fill="none" stroke="#101014"
+          stroke-width="2.4" stroke-linecap="round"/>
+
+    <!-- eyes: the whole point -->
+    <g id="eyeL">
+      <ellipse cx="78" cy="79" rx="16" ry="18" fill="#0d0d11"/>
+      <ellipse cx="78" cy="79" rx="13" ry="15" fill="url(#irisG)" filter="url(#eyeGlow)"/>
+      <ellipse id="pupilL" cx="78" cy="80" rx="6" ry="8.5" fill="#12060a"/>
+      <circle cx="72.5" cy="72" r="5" fill="#fff" opacity="0.96"/>
+      <circle cx="83" cy="86" r="2.4" fill="#fff" opacity="0.75"/>
+    </g>
+    <g id="eyeR">
+      <ellipse cx="122" cy="79" rx="16" ry="18" fill="#0d0d11"/>
+      <ellipse cx="122" cy="79" rx="13" ry="15" fill="url(#irisG)" filter="url(#eyeGlow)"/>
+      <ellipse id="pupilR" cx="122" cy="80" rx="6" ry="8.5" fill="#12060a"/>
+      <circle cx="116.5" cy="72" r="5" fill="#fff" opacity="0.96"/>
+      <circle cx="127" cy="86" r="2.4" fill="#fff" opacity="0.75"/>
+    </g>
+    <g id="lids" opacity="0">
+      <ellipse cx="78" cy="70" rx="17" ry="14" fill="#2b2b34"/>
+      <ellipse cx="122" cy="70" rx="17" ry="14" fill="#2b2b34"/>
+    </g>
+  </g>
+</svg><div>at pet size (192px)</div></div>
+<div class="col"><svg viewBox="0 0 200 200" width="96" height="96">
+  <defs>
+    <radialGradient id="headG" cx="0.34" cy="0.24" r="0.82">
+      <stop offset="0" stop-color="#474754"/><stop offset="0.5" stop-color="#2b2b34"/>
+      <stop offset="1" stop-color="#15151a"/>
+    </radialGradient>
+    <radialGradient id="bodyG" cx="0.36" cy="0.26" r="0.85">
+      <stop offset="0" stop-color="#3c3c48"/><stop offset="0.55" stop-color="#24242c"/>
+      <stop offset="1" stop-color="#131318"/>
+    </radialGradient>
+    <radialGradient id="bellyG" cx="0.5" cy="0.32" r="0.72">
+      <stop offset="0" stop-color="#5c5c69"/><stop offset="1" stop-color="#3a3a45"/>
+    </radialGradient>
+    <radialGradient id="irisG" cx="0.38" cy="0.32" r="0.78">
+      <stop offset="0" stop-color="#fff1cf"/><stop offset="0.28" stop-color="#ffb648"/>
+      <stop offset="0.68" stop-color="#ff6a1e"/><stop offset="1" stop-color="#b8260f"/>
+    </radialGradient>
+    <radialGradient id="gemG" cx="0.38" cy="0.28" r="0.8">
+      <stop offset="0" stop-color="#fff2d6"/><stop offset="0.42" stop-color="#ff9430"/>
+      <stop offset="1" stop-color="#c9260f"/>
+    </radialGradient>
+    <linearGradient id="hornG" x1="0" y1="1" x2="0.3" y2="0">
+      <stop offset="0" stop-color="#1a1a1f"/><stop offset="1" stop-color="#4a4a57"/>
+    </linearGradient>
+    <filter id="emberGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="2.6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="eyeGlow" x="-70%" y="-70%" width="240%" height="240%">
+      <feGaussianBlur stdDeviation="2.2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- ground contact shadow -->
+  <ellipse id="shadow" cx="100" cy="187" rx="43" ry="6.5" fill="#000" opacity="0.34"/>
+
+  <!-- tail: short, curled, ember tip -->
+  <g id="tail">
+    <path d="M138 150 C158 150 168 138 165 126 C163 118 155 115 149 119 C155 124 154 133 145 137 C141 139 139 144 138 150 Z" fill="#1c1c22"/>
+    <path d="M149 119 C151 112 157 108 163 110 C160 115 159 121 160 125 C155 124 151 122 149 119 Z" fill="#ff6a1e" filter="url(#emberGlow)" opacity="0.95"/>
+  </g>
+
+  <!-- hind legs -->
+  <g id="legs">
+    <ellipse cx="76" cy="172" rx="17" ry="12" fill="#1e1e25"/>
+    <ellipse cx="124" cy="172" rx="17" ry="12" fill="#1e1e25"/>
+    <g fill="#0e0e12">
+      <circle cx="67" cy="176" r="2.1"/><circle cx="74" cy="178" r="2.1"/><circle cx="81" cy="177" r="2.1"/>
+      <circle cx="119" cy="177" r="2.1"/><circle cx="126" cy="178" r="2.1"/><circle cx="133" cy="176" r="2.1"/>
+    </g>
+  </g>
+
+  <!-- body -->
+  <g id="body">
+    <ellipse cx="100" cy="145" rx="41" ry="34" fill="url(#bodyG)"/>
+    <ellipse cx="100" cy="152" rx="25" ry="23" fill="url(#bellyG)" opacity="0.92"/>
+    <path d="M64 130 C72 118 92 112 104 114" fill="none" stroke="#5a5a68" stroke-width="2.6"
+          stroke-linecap="round" opacity="0.32"/>
+    <g id="bodyEmber" filter="url(#emberGlow)">
+      <path d="M126 130 C132 137 131 146 126 153" fill="none" stroke="#ff5a1f" stroke-width="2.3" stroke-linecap="round"/>
+      <path d="M74 138 C70 144 71 151 75 156" fill="none" stroke="#ff5a1f" stroke-width="1.8" stroke-linecap="round" opacity="0.85"/>
+    </g>
+    <g id="gem" filter="url(#emberGlow)">
+      <path d="M100 122 L108 132 L100 142 L92 132 Z" fill="url(#gemG)"/>
+      <path d="M100 125 L104.5 132 L100 139 L95.5 132 Z" fill="#fff2d6" opacity="0.55"/>
+    </g>
+  </g>
+
+  <!-- arms -->
+  <g id="armL"><ellipse cx="63" cy="146" rx="11" ry="14" fill="#1c1c23" transform="rotate(-12 63 146)"/>
+    <g fill="#0e0e12"><circle cx="58" cy="157" r="2"/><circle cx="64" cy="159" r="2"/><circle cx="69" cy="157" r="2"/></g></g>
+  <g id="armR"><ellipse cx="137" cy="146" rx="11" ry="14" fill="#1c1c23" transform="rotate(12 137 146)"/>
+    <g fill="#0e0e12"><circle cx="131" cy="157" r="2"/><circle cx="137" cy="159" r="2"/><circle cx="142" cy="157" r="2"/></g></g>
+
+  <!-- head -->
+  <g id="head">
+    <g id="horns">
+      <path d="M66 46 C60 34 56 24 60 16 C68 22 74 32 76 42 Z" fill="url(#hornG)"/>
+      <path d="M134 46 C140 34 144 24 140 16 C132 22 126 32 124 42 Z" fill="url(#hornG)"/>
+    </g>
+    <g id="spines" filter="url(#emberGlow)" opacity="0.9">
+      <path d="M92 30 L96 18 L100 30 Z" fill="#ff6a1e"/>
+      <path d="M100 28 L104 14 L110 27 Z" fill="#ff8a2a"/>
+    </g>
+    <ellipse cx="100" cy="80" rx="53" ry="47" fill="url(#headG)"/>
+    <path d="M52 66 C60 46 82 36 100 36" fill="none" stroke="#63636f" stroke-width="3"
+          stroke-linecap="round" opacity="0.28"/>
+    <g id="headEmber" filter="url(#emberGlow)" opacity="0.9">
+      <path d="M141 66 C146 72 147 80 144 87" fill="none" stroke="#ff5a1f" stroke-width="1.9" stroke-linecap="round"/>
+    </g>
+
+    <!-- snout -->
+    <ellipse cx="100" cy="101" rx="19" ry="13" fill="#33333d"/>
+    <g fill="#101014"><ellipse cx="94" cy="97" rx="1.9" ry="1.4"/><ellipse cx="106" cy="97" rx="1.9" ry="1.4"/></g>
+    <path id="mouth" d="M91 106 C96 111 104 111 109 106" fill="none" stroke="#101014"
+          stroke-width="2.4" stroke-linecap="round"/>
+
+    <!-- eyes: the whole point -->
+    <g id="eyeL">
+      <ellipse cx="78" cy="79" rx="16" ry="18" fill="#0d0d11"/>
+      <ellipse cx="78" cy="79" rx="13" ry="15" fill="url(#irisG)" filter="url(#eyeGlow)"/>
+      <ellipse id="pupilL" cx="78" cy="80" rx="6" ry="8.5" fill="#12060a"/>
+      <circle cx="72.5" cy="72" r="5" fill="#fff" opacity="0.96"/>
+      <circle cx="83" cy="86" r="2.4" fill="#fff" opacity="0.75"/>
+    </g>
+    <g id="eyeR">
+      <ellipse cx="122" cy="79" rx="16" ry="18" fill="#0d0d11"/>
+      <ellipse cx="122" cy="79" rx="13" ry="15" fill="url(#irisG)" filter="url(#eyeGlow)"/>
+      <ellipse id="pupilR" cx="122" cy="80" rx="6" ry="8.5" fill="#12060a"/>
+      <circle cx="116.5" cy="72" r="5" fill="#fff" opacity="0.96"/>
+      <circle cx="127" cy="86" r="2.4" fill="#fff" opacity="0.75"/>
+    </g>
+    <g id="lids" opacity="0">
+      <ellipse cx="78" cy="70" rx="17" ry="14" fill="#2b2b34"/>
+      <ellipse cx="122" cy="70" rx="17" ry="14" fill="#2b2b34"/>
+    </g>
+  </g>
+</svg><div>96px</div></div>
+</body></html>

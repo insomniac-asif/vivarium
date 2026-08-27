@@ -10,6 +10,7 @@ const os = require('os');
 const HOME = os.homedir();
 const STATE_DIR = path.join(HOME, '.claude', 'pets', '.state');
 const CONFIG_PATH = path.join(HOME, '.claude', 'pets', '.vivarium.json');
+const PIDFILE = path.join(STATE_DIR, 'overlay.pid');
 const PET_ROOTS = [
   { root: path.join(HOME, '.claude', 'pets'), source: 'claude' },
   { root: path.join(HOME, '.codex', 'pets'), source: 'codex' },
@@ -28,10 +29,12 @@ let dragTimer = null;
 let dragging = false;
 let lastCursor = null;
 let currentMood = 'idle';
+let liveSessions = 0;        // sessions active in the last 30 min
+let attentionIndex = -1;     // index of the session that needs input, or -1
 let lastSessionStartTs = 0;
 let lastLookDir = -1;
 
-if (!app.requestSingleInstanceLock()) app.quit();
+if (!app.requestSingleInstanceLock()) app.exit(0);
 
 // ---- config ---------------------------------------------------------------
 function loadConfig() {
@@ -93,6 +96,19 @@ function applyPet(pet) {
 }
 
 // ---- state aggregation ----------------------------------------------------
+function lastSeen(s) {
+  return Math.max(s.active_ts || 0, s.event_ts || 0, s.prompt_ts || 0,
+                  s.stop_ts || 0, s.notify_ts || 0, s.start_ts || 0);
+}
+
+// A session counts as live only if it actually took a turn (prompt or start)
+// and has not ended. Subagent//-command noise never carries those stamps.
+function isLive(s, now) {
+  if (s.ended_ts) return false;
+  if (!s.prompt_ts && !s.start_ts) return false;
+  return now - lastSeen(s) < 1800;
+}
+
 function readSessionStates() {
   const out = [];
   let files;
@@ -103,8 +119,11 @@ function readSessionStates() {
     const p = path.join(STATE_DIR, f);
     try {
       const s = JSON.parse(fs.readFileSync(p, 'utf8'));
-      const newest = Math.max(s.active_ts || 0, s.event_ts || 0);
-      if (now - newest > 86400) { fs.unlinkSync(p); continue; }
+      // reap: ended sessions after 10 min, anything untouched for a day
+      if ((s.ended_ts && now - s.ended_ts > 600) || now - lastSeen(s) > 86400) {
+        fs.unlinkSync(p);
+        continue;
+      }
       out.push(s);
     } catch {}
   }
@@ -112,12 +131,18 @@ function readSessionStates() {
 }
 
 function sessionMood(s, now) {
-  const active = now - (s.active_ts || 0);
-  const evAge = now - (s.event_ts || 0);
-  if (s.event === 'Notification' && evAge < 900) return 'needs_you';
-  if (active < 12) return 'working';
-  if (s.event === 'Stop' && evAge < 90) return 'done';
-  if (active < 1800) return 'idle';
+  // Derive from whichever stamps exist: the statusline heartbeat (active_ts)
+  // is the freshest signal but stops during long tool runs, so turn stamps
+  // carry the state the rest of the time.
+  const notify = s.notify_ts || (s.event === 'Notification' ? s.event_ts : 0) || 0;
+  const stop = s.stop_ts || 0;
+  const prompt = Math.max(s.prompt_ts || 0, s.start_ts || 0);
+  const active = s.active_ts || 0;
+  if (notify >= stop && now - notify < 900) return 'needs_you';
+  if (stop && now - stop < 90) return 'done';
+  if (now - active < 12) return 'working';                     // live heartbeat
+  if (prompt > stop && now - prompt < 900) return 'working';   // turn in flight
+  if (now - Math.max(active, prompt, stop, notify) < 1800) return 'idle';
   return 'asleep';
 }
 
@@ -133,13 +158,19 @@ function aggregate() {
   for (const s of states) {
     const m = sessionMood(s, now);
     if (PRECEDENCE.indexOf(m) < PRECEDENCE.indexOf(mood)) mood = m;
-    if (now - (s.active_ts || 0) < 1800) sessions++;
+    if (isLive(s, now)) sessions++;
     if (!lead || (s.active_ts || 0) > (lead.active_ts || 0)) lead = s;
     if (s.event === 'SessionStart' && (s.event_ts || 0) > lastSessionStartTs && now - s.event_ts < 10) {
       lastSessionStartTs = s.event_ts;
       sessionStart = true;
     }
   }
+  // remember the shape of the session pool for locomotion
+  states.sort((a, b) => (a.session_id || '').localeCompare(b.session_id || ''));
+  const live = states.filter(s => isLive(s, now));
+  liveSessions = live.length;
+  attentionIndex = live.findIndex(s => sessionMood(s, now) === 'needs_you');
+
   const hour = new Date().getHours();
   currentMood = mood;
   return {
@@ -178,6 +209,104 @@ function pollLook() {
   }
 }
 
+// ---- locomotion -----------------------------------------------------------
+// The pet keeps a POST per live session, spaced along the strip it lives on,
+// and patrols between them: one session means it mostly stays put, several
+// means it paces, and a session that needs you pins it to that session's post.
+const WALK_SPEED = 54;           // px/s — a walk, not a slide
+const DWELL_MIN = 6000;
+const DWELL_MAX = 22000;
+
+let motion = { targetX: null, dwellUntil: 0, walking: false, dir: 1, last: 0 };
+let lastWalkSent = null;
+
+// VIVARIUM_TRACE=1 logs locomotion decisions to
+// ~/.claude/pets/.state/overlay-trace.log — for debugging movement.
+const TRACE = !!process.env.VIVARIUM_TRACE ||
+              fs.existsSync(path.join(STATE_DIR, 'TRACE'));
+function trace(msg) {
+  if (!TRACE) return;
+  try {
+    fs.appendFileSync(path.join(STATE_DIR, 'overlay-trace.log'),
+                      `${new Date().toISOString()} ${msg}
+`);
+  } catch {}
+}
+
+function strip() {
+  const b = win.getBounds();
+  return screen.getDisplayNearestPoint({ x: b.x + b.width / 2, y: b.y + b.height / 2 }).workArea;
+}
+
+function postX(i, n) {
+  const wa = strip();
+  const span = wa.width - WIN_W;
+  if (n <= 1) return wa.x + span * 0.82;                 // its usual corner
+  return wa.x + span * ((i + 1) / (n + 1));              // evenly spaced posts
+}
+
+function chooseTarget() {
+  const n = Math.max(1, liveSessions);
+  if (attentionIndex >= 0) return postX(attentionIndex, n);   // go stand there
+  if (n === 1) {
+    const wa = strip();
+    const base = postX(0, 1);
+    return Math.max(wa.x, Math.min(wa.x + wa.width - WIN_W,
+                                   base + (Math.random() - 0.5) * 140));
+  }
+  return postX(Math.floor(Math.random() * n), n);            // pace the posts
+}
+
+function setWalking(on, dir) {
+  const sig = on ? `w${dir}` : 'stop';
+  if (sig === lastWalkSent) return;
+  lastWalkSent = sig;
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('juna-state', { walking: on, dragDir: dir });
+  }
+}
+
+function tickMotion() {
+  if (!win || win.isDestroyed() || dragging) return;
+  const now = Date.now();
+  const dt = motion.last ? Math.min(0.08, (now - motion.last) / 1000) : 0;
+  motion.last = now;
+
+  if (currentMood === 'asleep') { setWalking(false, motion.dir); return; }
+
+  const b = win.getBounds();
+  if (motion.targetX === null) {
+    if (now < motion.dwellUntil) { setWalking(false, motion.dir); return; }
+    const t = chooseTarget();
+    trace(`decide x=${b.x} target=${Math.round(t)} mood=${currentMood} live=${liveSessions}`);
+    if (Math.abs(t - b.x) < 24) {                 // already there: dwell again
+      motion.dwellUntil = now + DWELL_MIN + Math.random() * (DWELL_MAX - DWELL_MIN);
+      return;
+    }
+    motion.targetX = Math.round(t);
+    motion.dir = motion.targetX > b.x ? 1 : -1;
+    if (petHit) { petHit = false; win.setIgnoreMouseEvents(true, { forward: true }); }
+    trace(`walk x=${b.x} -> ${motion.targetX} sessions=${liveSessions} attention=${attentionIndex} mood=${currentMood}`);
+  }
+
+  const step = WALK_SPEED * dt * motion.dir;
+  let nx = b.x + step;
+  const arrived = (motion.dir > 0 && nx >= motion.targetX) ||
+                  (motion.dir < 0 && nx <= motion.targetX);
+  if (arrived) {
+    nx = motion.targetX;
+    motion.targetX = null;
+    motion.dwellUntil = now + DWELL_MIN + Math.random() * (DWELL_MAX - DWELL_MIN);
+    setWalking(false, motion.dir);
+    trace(`arrived x=${nx}`);
+  } else {
+    setWalking(true, motion.dir);
+  }
+  const wa = strip();
+  nx = Math.max(wa.x, Math.min(wa.x + wa.width - WIN_W, Math.round(nx)));
+  win.setPosition(nx, b.y);
+}
+
 // ---- window ---------------------------------------------------------------
 function createWindow() {
   const cfg = loadConfig();
@@ -202,9 +331,13 @@ function createWindow() {
   });
   win.setAlwaysOnTop(true, 'screen-saver');
   win.setMenu(null);
+  // start transparent to clicks; the renderer reports when the cursor is
+  // actually over opaque pixels and we take the mouse back just for those
+  win.setIgnoreMouseEvents(true, { forward: true });
   applyPet(currentPet());
   setInterval(pushState, 1000);
   setInterval(pollLook, 180);
+  setInterval(tickMotion, 33);
 }
 
 // ---- drag (main follows cursor; reports direction for run animation) ------
@@ -238,6 +371,8 @@ ipcMain.on('drag-end', () => {
   if (win && !win.isDestroyed()) {
     const [x, y] = win.getPosition();
     saveConfig({ x, y });
+    motion.targetX = null;
+    motion.dwellUntil = Date.now() + DWELL_MAX;
     // a press that never moved is a pet, not a drag
     const petted = dragMoved < 4;
     win.webContents.send('juna-state', petted ? { dragging: false, event: 'Petted' } : { dragging: false });
@@ -257,6 +392,13 @@ function setAutostart(on) {
 }
 
 // ---- menu -----------------------------------------------------------------
+let petHit = false;
+ipcMain.on('hit', (_e, hit) => {
+  if (hit === petHit || !win || win.isDestroyed()) return;
+  petHit = hit;
+  win.setIgnoreMouseEvents(!hit, { forward: true });
+});
+
 ipcMain.on('context-menu', () => {
   const pets = discoverPets();
   const active = loadConfig().pet || pets[0].id;
@@ -278,5 +420,24 @@ ipcMain.on('context-menu', () => {
   menu.popup({ window: win });
 });
 
-app.whenReady().then(createWindow);
+// liveness beacon: SessionStart hooks spawn the overlay only when this file
+// is missing or stale, so a running overlay is never duplicated
+function beaconWrite() {
+  try {
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+    fs.writeFileSync(PIDFILE, String(process.pid));
+  } catch {}
+}
+function beaconClear() {
+  try { fs.unlinkSync(PIDFILE); } catch {}
+}
+
+app.whenReady().then(() => {
+  beaconWrite();
+  trace(`boot pid=${process.pid} trace=on`);
+  setInterval(beaconWrite, 30000);
+  createWindow();
+});
 app.on('window-all-closed', () => app.quit());
+app.on('before-quit', beaconClear);
+process.on('exit', beaconClear);

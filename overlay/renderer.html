@@ -90,7 +90,8 @@ var state = {
   sessions: 0,
   lookDir: -1,             // 0-15 look index, -1 = neutral deadzone
   dragging: false,
-  dragDir: 0,              // -1 left, +1 right while dragging
+  walking: false,          // autonomous locomotion (session patrol)
+  dragDir: 0,              // -1 left, +1 right while dragging or walking
 };
 var anim = {
   name: 'idle',
@@ -102,7 +103,7 @@ var anim = {
 var lastMood = 'idle';
 
 function baseState() {
-  if (state.dragging) return state.dragDir < 0 ? 'running-left' : 'running-right';
+  if (state.dragging || state.walking) return state.dragDir < 0 ? 'running-left' : 'running-right';
   return MOOD_TO_STATE[state.mood] || 'idle';
 }
 
@@ -155,7 +156,7 @@ function draw() {
   if (!sheet) return;
   var row, col;
   // Idle + pointer outside deadzone -> static look-direction cell.
-  if (!anim.oneshot && !state.dragging && anim.name === 'idle' &&
+  if (!anim.oneshot && !state.dragging && !state.walking && anim.name === 'idle' &&
       state.lookDir >= 0 && state.mood !== 'asleep') {
     var lc = lookCell(state.lookDir);
     row = lc.row; col = lc.col;
@@ -191,6 +192,7 @@ window.vivarium = {
     if (typeof s.sessions === 'number') state.sessions = s.sessions;
     if (typeof s.lookDir === 'number') state.lookDir = s.lookDir;
     if (typeof s.dragging === 'boolean') state.dragging = s.dragging;
+    if (typeof s.walking === 'boolean') state.walking = s.walking;
     if (typeof s.dragDir === 'number' && s.dragDir !== 0) state.dragDir = s.dragDir;
     if (s.event === 'SessionStart') playOneshot('jumping');
     if (s.event === 'Petted') playOneshot('waving');

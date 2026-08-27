@@ -46,7 +46,8 @@ var EMBER_DIM = [139, 26, 30];   // #8b1a1e
 var DAY_GREY = [106, 106, 110];  // veins bank to grey in daylight
 var HOT_CORE = [255, 233, 221];  // white-hot (eye cores, overburn)
 
-var state = { mood: 'idle', ctxPct: null, drowsy: false, sessions: 0, nightGlow: true };
+var state = { mood: 'idle', ctxPct: null, drowsy: false, sessions: 0, nightGlow: true,
+              walking: false, dragDir: 1 };
 var lastMood = 'idle';
 
 // eased params: {value}
@@ -136,6 +137,8 @@ function draw(t) {
 
   // needs_you: the egg rocks side to side instead of looking up
   var rock = (state.mood === 'needs_you') ? Math.sin(t * 3.2) * 0.09 : 0;
+  // walking: rock along the direction of travel with a rolling gait
+  if (state.walking) rock += Math.sin(t * 7.5) * 0.07 + (state.dragDir || 1) * 0.05;
 
   ctx.save();
   ctx.translate(cx, cy);
@@ -237,7 +240,7 @@ requestAnimationFrame(loop);
 window.juna = { // bridge.js looks for window.vivarium || window.juna
   setState: function (s) {
     if (!s) return;
-    ['ctxPct', 'drowsy', 'sessions', 'nightGlow'].forEach(function (kk) {
+    ['ctxPct', 'drowsy', 'sessions', 'nightGlow', 'walking', 'dragDir'].forEach(function (kk) {
       if (kk in s && s[kk] !== undefined) state[kk] = s[kk];
     });
     if (s.event === 'Petted') { hopT = 0; petFlare = 1200; }
