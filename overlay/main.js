@@ -7,6 +7,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const ccd = require('./ccd');
 
 const HOME = os.homedir();
 const STATE_DIR = path.join(HOME, '.claude', 'pets', '.state');
@@ -33,6 +34,7 @@ let currentMood = 'idle';
 let liveSessions = 0;        // sessions active in the last 30 min
 let attentionIndex = -1;     // index of the session that needs input, or -1
 let focusPid = null;         // window to raise when the pet is clicked
+let focusCcd = null;         // the app session that window should be showing
 const FROM_HOOK = process.argv.includes('--from-hook');
 const bootedAt = Date.now();
 let emptySince = 0;
@@ -177,7 +179,9 @@ function sessionMood(s, now) {
   if (now - active < 12) return 'working';                     // live heartbeat
   if (prompt > stop && now - prompt < 900) return 'working';   // turn in flight
   if (now - Math.max(active, prompt, stop, notify) < 1800) return 'idle';
-  return 'asleep';
+  // a session we know is running has not gone to sleep just because it has not
+  // written to us; only a stale file earns 'asleep'
+  return s.silent ? 'idle' : 'asleep';
 }
 
 const PRECEDENCE = ['needs_you', 'working', 'done', 'idle', 'asleep'];
@@ -213,6 +217,8 @@ function aggregate() {
     ? posts[attentionIndex]
     : live.slice().sort((a, b) => lastSeen(b) - lastSeen(a))[0];
   focusPid = speaking && speaking.host_pid ? speaking.host_pid : null;
+  const speakingId = speaking && ccd.titleFor(speaking.session_id, now * 1000);
+  focusCcd = (speakingId && speakingId.ccdSessionId) || null;
 
   const hour = new Date().getHours();
   currentMood = mood;
@@ -264,6 +270,35 @@ function gitBranch(dir) {
 // Both the tray and the pet's own session count read this, so the dots the pet
 // carries can never disagree with the rows the tray lists.
 function livePool(states, now) {
+  // Preferred source: the CLI writes a file per RUNNING session naming the
+  // process that owns it. That turns "which sessions exist" from a guess about
+  // timestamps into a fact about the process table, and it lists a session that
+  // has not written a pet state file yet.
+  const running = ccd.runningSessions();
+  if (running.length) {
+    const byId = new Map();
+    for (const s of states) if (s.session_id) byId.set(s.session_id, s);
+    return running
+      // a one-shot `claude -p` run is not a session anyone is sitting in front of
+      .filter(r => !r.kind || r.kind === 'interactive')
+      .map(r => {
+        const st = byId.get(r.sessionId);
+        return Object.assign({}, st || {}, {
+          session_id: r.sessionId,
+          owner_pid: r.pid,
+          cwd: (st && st.cwd) || r.cwd,
+          started_at: r.startedAt,
+          // running, but it has not reported anything yet -- a brand new session,
+          // or one whose hooks are not installed
+          silent: !st,
+        });
+      })
+      .filter(s => !s.ended_ts)
+      .sort((a, b) => (lastSeen(b) || (b.started_at || 0) / 1000)
+                    - (lastSeen(a) || (a.started_at || 0) / 1000));
+  }
+
+  // Fallback for anywhere the registry is not written: back to timestamps.
   const live = states
     .filter(s => isLive(s, now))
     .sort((a, b) => lastSeen(b) - lastSeen(a));
@@ -285,16 +320,25 @@ function sessionSummaries() {
   const now = Date.now() / 1000;
   return livePool(readSessionStates(), now)
     .slice(0, 6)
-    .map(s => ({
-      folder: projectName(s.cwd),
-      branch: s.cwd ? gitBranch(s.cwd) : null,
-      mood: sessionMood(s, now),
-      age: now - lastSeen(s),
-      ctx: typeof s.ctx === 'number' ? s.ctx : null,
-      model: s.model ? String(s.model).toLowerCase() : null,
-      cost: typeof s.cost === 'number' ? s.cost : null,
-      host_pid: s.host_pid || null,
-    }));
+    .map(s => {
+      // The app names its sessions, and those names are what the user thinks in.
+      // The folder is a poor substitute: every session in the desktop app can
+      // share one working directory, so naming rows after it labelled them all
+      // "Desktop". Fall back to the folder only when there is no title.
+      const id = ccd.titleFor(s.session_id, now * 1000);
+      return {
+        title: (id && id.title) || null,
+        folder: projectName(s.cwd),
+        branch: s.cwd ? gitBranch(s.cwd) : null,
+        mood: sessionMood(s, now),
+        age: now - lastSeen(s),
+        ctx: typeof s.ctx === 'number' ? s.ctx : null,
+        model: s.model ? String(s.model).toLowerCase() : null,
+        cost: typeof s.cost === 'number' ? s.cost : null,
+        host_pid: s.host_pid || null,
+        ccd_id: (id && id.ccdSessionId) || null,
+      };
+    });
 }
 
 // ---- session tray -----------------------------------------------------------
@@ -368,8 +412,10 @@ ipcMain.on('panel-size', (_e, h) => {
     placePanel();
   }
 });
-ipcMain.on('panel-raise', (_e, pid) => {
-  if (pid) { focusPid = pid; raiseSession(); }
+ipcMain.on('panel-raise', (_e, row) => {
+  const pid = row && typeof row === 'object' ? row.pid : row;
+  const id = row && typeof row === 'object' ? row.ccd : null;
+  if (pid || id) { focusPid = pid || focusPid; focusCcd = id || null; raiseSession(); }
   if (panel && !panel.isDestroyed()) panel.hide();
 });
 
@@ -382,7 +428,7 @@ function pushState() {
     // report the pool whenever it changes, so what the tray would list can be
     // checked without having to hover the pet to find out
     const shape = sessionSummaries()
-      .map(x => `${x.folder || '?'}${x.branch ? '@' + x.branch : ''}:${x.mood}`).join(',');
+      .map(x => `${x.title || x.folder || '?'}:${x.mood}`).join(' | ');
     if (shape !== lastTracedShape) { lastTracedShape = shape; trace(`pool [${shape}]`); }
   }
 
@@ -569,7 +615,14 @@ let pressStarted = 0;
 
 function raiseSession() {
   // Codex's pet is a launcher: clicking it returns you to what it represents.
-  if (!focusPid) return;
+  if (!focusPid && !focusCcd) return;
+  // Ask the app for this particular session first. Its deep link restores and
+  // focuses the window it already has; whether it also switches to the session
+  // named in the URL is the app's decision, and in current builds that half is
+  // behind a feature gate. Firing it costs nothing and starts working the day
+  // the gate opens.
+  if (focusCcd) ccd.openSession(focusCcd);
+  if (!focusPid) { if (win && !win.isDestroyed()) win.blur(); return; }
   if (process.platform === 'win32') {
     try {
       spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
@@ -625,7 +678,7 @@ ipcMain.on('drag-end', () => {
       trace(`gesture=drag moved=${Math.round(dragMoved)}`);
       win.webContents.send('juna-state', { dragging: false });
     } else if (held < 450) {
-      trace(`gesture=tap held=${held} raise=${focusPid}`);
+      trace(`gesture=tap held=${held} raise=${focusPid} session=${focusCcd || '-'}`);
       win.webContents.send('juna-state', { dragging: false });
       showPanel();          // always visible feedback
       raiseSession();

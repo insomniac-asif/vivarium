@@ -67,7 +67,9 @@ window.panelBridge.onSessions(function (list) {
     top.className = 'top';
     const name = document.createElement('div');
     name.className = 'name';
-    name.textContent = s.folder || 'session';
+    // what the app calls this session; the folder is the fallback, and a poor
+    // one, because every session in the app can share one directory
+    name.textContent = s.title || s.folder || 'session';
     const branch = document.createElement('div');
     branch.className = 'branch';
     branch.textContent = s.branch ? '· ' + s.branch : '';
@@ -81,7 +83,10 @@ window.panelBridge.onSessions(function (list) {
     st.textContent = LABEL[s.mood] || s.mood;
     sub.appendChild(st);
     const rest = document.createElement('span');
-    rest.textContent = ' · ' + ago(s.age) + (s.model ? ' · ' + s.model : '') +
+    // once the row is named after the session, the folder still earns its place
+    // on the second line -- it says where the work is happening
+    const where = s.title && s.folder ? ' · ' + s.folder : '';
+    rest.textContent = ' · ' + ago(s.age) + where + (s.model ? ' · ' + s.model : '') +
                        (s.cost ? ' · $' + s.cost.toFixed(2) : '');
     sub.appendChild(rest);
 
@@ -94,7 +99,7 @@ window.panelBridge.onSessions(function (list) {
       m.appendChild(f); main.appendChild(m);
     }
     row.appendChild(dot); row.appendChild(main);
-    row.addEventListener('click', function () { window.panelBridge.raise(s.host_pid); });
+    row.addEventListener('click', function () { window.panelBridge.raise({ pid: s.host_pid, ccd: s.ccd_id }); });
     rows.appendChild(row);
   }
   window.panelBridge.sized(document.body.scrollHeight);
