@@ -29,10 +29,16 @@ What the ecosystem does, and what Vivarium implements.
   embers for ~1.2s.
 - **Drag**: directional — the pet plays running-left/right by drag direction
   while following the cursor.
-- **Click = launcher** (Codex's actual behaviour): a quick tap raises the
-  window of the session the pet is speaking for — whoever needs input, else
-  whoever ran most recently. Each session records its host window at
-  SessionStart by walking its own process ancestry.
+- **Session tray** (Codex attaches an activity list to its pet; this is that):
+  hover the pet for ~0.4s and a card opens listing every live session — the
+  folder and git branch, what it is doing, how long since it moved, the model,
+  the cost, and a context-pressure meter that turns pale past 85%. Clicking a
+  row raises that session's window. The card follows the pet, refreshes every
+  second while open, and hides when you move away.
+- **Click = launcher** (Codex's actual behaviour): a quick tap opens the tray
+  AND raises the window of the session the pet is speaking for — whoever needs
+  input, else whoever ran most recently. Each session records its host window
+  by walking its own process ancestry.
 - **Press and hold** (>450ms) pets instead of launching, so the two gestures
   never collide.
 - **Spawns with Claude**: a SessionStart hook starts the overlay if it is not

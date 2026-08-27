@@ -207,6 +207,118 @@ function aggregate() {
   };
 }
 
+function gitBranch(dir) {
+  // cheap: read .git/HEAD walking up, no subprocess
+  try {
+    let d = dir;
+    for (let i = 0; i < 6 && d; i++) {
+      const head = path.join(d, '.git', 'HEAD');
+      if (fs.existsSync(head)) {
+        const ref = fs.readFileSync(head, 'utf8').trim();
+        return ref.startsWith('ref:') ? ref.split('/').pop() : ref.slice(0, 7);
+      }
+      const up = path.dirname(d);
+      if (up === d) break;
+      d = up;
+    }
+  } catch {}
+  return null;
+}
+
+function sessionSummaries() {
+  const now = Date.now() / 1000;
+  return readSessionStates()
+    .filter(s => isLive(s, now))
+    .sort((a, b) => lastSeen(b) - lastSeen(a))
+    .slice(0, 6)
+    .map(s => ({
+      folder: s.cwd ? path.basename(String(s.cwd).replace(/[\/]+$/, '')) : null,
+      branch: s.cwd ? gitBranch(s.cwd) : null,
+      mood: sessionMood(s, now),
+      age: now - lastSeen(s),
+      ctx: typeof s.ctx === 'number' ? s.ctx : null,
+      model: s.model ? String(s.model).toLowerCase() : null,
+      cost: typeof s.cost === 'number' ? s.cost : null,
+      host_pid: s.host_pid || null,
+    }));
+}
+
+// ---- session tray -----------------------------------------------------------
+// Codex attaches an activity list to its pet; this is that. Hovering the pet
+// opens a card of live sessions — what each is doing, where, how full its
+// context is — and clicking a row raises that session's window.
+let panel = null;
+let panelOver = false;
+let petOver = false;
+let panelTimer = null;
+
+function ensurePanel() {
+  if (panel && !panel.isDestroyed()) return panel;
+  panel = new BrowserWindow({
+    width: 320, height: 200, show: false, frame: false, transparent: true,
+    resizable: false, skipTaskbar: true, hasShadow: false, alwaysOnTop: true,
+    focusable: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-panel.js'),
+      contextIsolation: true, nodeIntegration: false, backgroundThrottling: false,
+    },
+  });
+  panel.setAlwaysOnTop(true, 'screen-saver');
+  panel.setMenu(null);
+  panel.loadFile('sessions.html');
+  panel.on('closed', () => { panel = null; });
+  return panel;
+}
+
+function placePanel() {
+  if (!panel || panel.isDestroyed() || !win || win.isDestroyed()) return;
+  const b = win.getBounds();
+  const p = panel.getBounds();
+  const wa = screen.getDisplayNearestPoint({ x: b.x + b.width / 2, y: b.y + b.height / 2 }).workArea;
+  let x = b.x + b.width / 2 - p.width / 2;
+  let y = b.y - p.height + 8;                    // above the pet by default
+  if (y < wa.y) y = b.y + b.height - 8;          // no room above: sit below
+  x = Math.max(wa.x, Math.min(wa.x + wa.width - p.width, x));
+  y = Math.max(wa.y, Math.min(wa.y + wa.height - p.height, y));
+  panel.setPosition(Math.round(x), Math.round(y));
+}
+
+function showPanel() {
+  trace('panel show requested');
+  const w = ensurePanel();
+  const list = sessionSummaries();
+  trace(`panel show sessions=${list.length} ` +
+        list.map(x => `${x.folder || '?'}:${x.mood}`).join(','));
+  w.webContents.send('sessions', list);
+  placePanel();
+  if (!w.isVisible()) w.showInactive();
+}
+
+function hidePanelSoon() {
+  clearTimeout(panelTimer);
+  panelTimer = setTimeout(() => {
+    if (!petOver && !panelOver && panel && !panel.isDestroyed() && panel.isVisible()) {
+      panel.hide();
+      trace('panel hide');
+    }
+  }, 450);
+}
+
+ipcMain.on('panel-over', (_e, v) => { panelOver = !!v; if (!v) hidePanelSoon(); });
+ipcMain.on('panel-size', (_e, h) => {
+  if (!panel || panel.isDestroyed()) return;
+  const height = Math.max(90, Math.min(430, Math.round(h) + 12));
+  const b = panel.getBounds();
+  if (Math.abs(b.height - height) > 3) {
+    panel.setBounds({ x: b.x, y: b.y, width: b.width, height });
+    placePanel();
+  }
+});
+ipcMain.on('panel-raise', (_e, pid) => {
+  if (pid) { focusPid = pid; raiseSession(); }
+  if (panel && !panel.isDestroyed()) panel.hide();
+});
+
 function pushState() {
   if (!win || win.isDestroyed()) return;
   const state = aggregate();
@@ -217,6 +329,11 @@ function pushState() {
   // autostart or by hand is the user's and never self-exits. The 60s floor
   // covers the gap before the first session writes its state, and an
   // unreadable state dir must never be read as "no sessions".
+  if (panel && !panel.isDestroyed() && panel.isVisible()) {
+    panel.webContents.send('sessions', sessionSummaries());
+    placePanel();
+  }
+
   if (!FROM_HOOK || loadConfig().persist) return;
   if (Date.now() - bootedAt < 60000) return;
   let readable = true;
@@ -371,6 +488,7 @@ function createWindow() {
   });
   win.setAlwaysOnTop(true, 'screen-saver');
   win.setMenu(null);
+  pinned = !!cfg.pinned;      // honour it from the first frame, not a second in
   clampToWorkArea();
   screen.on('display-removed', clampToWorkArea);
   screen.on('display-metrics-changed', clampToWorkArea);
@@ -448,6 +566,7 @@ ipcMain.on('drag-end', () => {
     } else if (held < 450) {
       trace(`gesture=tap held=${held} raise=${focusPid}`);
       win.webContents.send('juna-state', { dragging: false });
+      showPanel();          // always visible feedback
       raiseSession();
     } else {
       trace(`gesture=hold held=${held} -> pet`);
@@ -470,10 +589,23 @@ function setAutostart(on) {
 
 // ---- menu -----------------------------------------------------------------
 let petHit = false;
+let hoverSince = 0;
 ipcMain.on('hit', (_e, hit) => {
   if (hit === petHit || !win || win.isDestroyed()) return;
   petHit = hit;
+  trace(`hit=${hit}`);
   win.setIgnoreMouseEvents(!hit, { forward: true });
+  petOver = hit;
+  if (hit) {
+    // keep the hover clock running across brief misses at the silhouette edge,
+    // so a wobbling cursor still opens the tray
+    if (!hoverSince || Date.now() - hoverSince > 1500) hoverSince = Date.now();
+    clearTimeout(panelTimer);
+    const waited = Date.now() - hoverSince;
+    panelTimer = setTimeout(showPanel, Math.max(0, 380 - waited));
+  } else {
+    hidePanelSoon();
+  }
 });
 
 ipcMain.on('context-menu', () => {

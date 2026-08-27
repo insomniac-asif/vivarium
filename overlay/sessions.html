@@ -1,0 +1,106 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>sessions</title>
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden;
+               font-family: "Segoe UI", system-ui, sans-serif; -webkit-user-select: none; }
+  #card { margin: 6px; background: rgba(16,16,20,0.96); border: 1px solid #2b2b34;
+          border-radius: 10px; overflow: hidden; box-shadow: 0 8px 28px rgba(0,0,0,0.55); }
+  .hdr { display: flex; align-items: center; justify-content: space-between;
+         padding: 9px 12px 7px; color: #6a6a72; font-size: 10px;
+         letter-spacing: 0.14em; text-transform: uppercase; }
+  .row { display: flex; gap: 10px; align-items: flex-start; padding: 9px 12px;
+         border-top: 1px solid #22222a; cursor: pointer; }
+  .row:hover { background: rgba(255,120,40,0.10); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex: none; }
+  .main { flex: 1; min-width: 0; }
+  .top { display: flex; gap: 8px; align-items: baseline; }
+  .name { color: #e8e8ec; font-size: 13px; font-weight: 600;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .branch { color: #7a7a86; font-size: 11px; white-space: nowrap; }
+  .sub { color: #9a9aa4; font-size: 11px; margin-top: 2px;
+         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .state { font-size: 11px; font-weight: 600; }
+  .meter { height: 3px; background: #26262e; border-radius: 2px; margin-top: 6px; }
+  .fill { height: 100%; border-radius: 2px; background: #ff6a1e; }
+  .empty { padding: 14px 12px; color: #6a6a72; font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="card"><div class="hdr"><span>Sessions</span><span id="count"></span></div><div id="rows"></div></div>
+<script>
+const COLOR = { needs_you: '#ff8a2a', working: '#ff2b33', done: '#5ad19a',
+                idle: '#7a7a86', asleep: '#4a4a55' };
+const LABEL = { needs_you: 'needs you', working: 'working', done: 'done',
+                idle: 'idle', asleep: 'asleep' };
+
+function ago(sec) {
+  if (sec < 60) return Math.max(0, Math.round(sec)) + 's ago';
+  if (sec < 3600) return Math.round(sec / 60) + 'm ago';
+  return Math.round(sec / 3600) + 'h ago';
+}
+
+window.panelBridge.onSessions(function (list) {
+  const rows = document.getElementById('rows');
+  document.getElementById('count').textContent = list.length ? list.length : '';
+  rows.innerHTML = '';
+  if (!list.length) {
+    const d = document.createElement('div');
+    d.className = 'empty';
+    d.textContent = 'No active sessions.';
+    rows.appendChild(d);
+    window.panelBridge.sized(document.body.scrollHeight);
+    return;
+  }
+  for (const s of list) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const dot = document.createElement('div');
+    dot.className = 'dot';
+    dot.style.background = COLOR[s.mood] || '#7a7a86';
+    const main = document.createElement('div');
+    main.className = 'main';
+
+    const top = document.createElement('div');
+    top.className = 'top';
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = s.folder || 'session';
+    const branch = document.createElement('div');
+    branch.className = 'branch';
+    branch.textContent = s.branch ? '· ' + s.branch : '';
+    top.appendChild(name); top.appendChild(branch);
+
+    const sub = document.createElement('div');
+    sub.className = 'sub';
+    const st = document.createElement('span');
+    st.className = 'state';
+    st.style.color = COLOR[s.mood] || '#7a7a86';
+    st.textContent = LABEL[s.mood] || s.mood;
+    sub.appendChild(st);
+    const rest = document.createElement('span');
+    rest.textContent = ' · ' + ago(s.age) + (s.model ? ' · ' + s.model : '') +
+                       (s.cost ? ' · $' + s.cost.toFixed(2) : '');
+    sub.appendChild(rest);
+
+    main.appendChild(top); main.appendChild(sub);
+    if (typeof s.ctx === 'number') {
+      const m = document.createElement('div'); m.className = 'meter';
+      const f = document.createElement('div'); f.className = 'fill';
+      f.style.width = Math.min(100, s.ctx) + '%';
+      if (s.ctx > 85) f.style.background = '#ffd9a8';
+      m.appendChild(f); main.appendChild(m);
+    }
+    row.appendChild(dot); row.appendChild(main);
+    row.addEventListener('click', function () { window.panelBridge.raise(s.host_pid); });
+    rows.appendChild(row);
+  }
+  window.panelBridge.sized(document.body.scrollHeight);
+});
+document.addEventListener('mouseenter', function () { window.panelBridge.over(true); });
+document.addEventListener('mouseleave', function () { window.panelBridge.over(false); });
+</script>
+</body>
+</html>

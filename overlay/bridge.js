@@ -23,10 +23,19 @@
       var r = canvas.getBoundingClientRect();
       var x = Math.floor((e.clientX - r.left) * (canvas.width / r.width));
       var y = Math.floor((e.clientY - r.top) * (canvas.height / r.height));
+      // sample a small neighbourhood, not one pixel: a single-pixel test on a
+      // textured edge flickers between hit and miss as the cursor drifts, and
+      // the flicker was cancelling the hover that opens the session tray
       var hit = false;
-      if (x >= 0 && y >= 0 && x < canvas.width && y < canvas.height) {
+      var R = 5;
+      var x0 = Math.max(0, x - R), y0 = Math.max(0, y - R);
+      var x1 = Math.min(canvas.width, x + R + 1), y1 = Math.min(canvas.height, y + R + 1);
+      if (x1 > x0 && y1 > y0) {
         try {
-          hit = canvas.getContext('2d').getImageData(x, y, 1, 1).data[3] > 12;
+          var d = canvas.getContext('2d').getImageData(x0, y0, x1 - x0, y1 - y0).data;
+          for (var i = 3; i < d.length; i += 4) {
+            if (d[i] > 12) { hit = true; break; }
+          }
         } catch (err) {}
       }
       if (hit !== lastHit) { lastHit = hit; window.junaBridge.hit(hit); }
