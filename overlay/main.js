@@ -616,12 +616,11 @@ let pressStarted = 0;
 function raiseSession() {
   // Codex's pet is a launcher: clicking it returns you to what it represents.
   if (!focusPid && !focusCcd) return;
-  // Ask the app for this particular session first. Its deep link restores and
-  // focuses the window it already has; whether it also switches to the session
-  // named in the URL is the app's decision, and in current builds that half is
-  // behind a feature gate. Firing it costs nothing and starts working the day
-  // the gate opens.
-  if (focusCcd) ccd.openSession(focusCcd);
+  // Ask the app for this particular session. Sessions in the desktop app are
+  // not separate windows, so raising a window can only ever land you in the app
+  // -- getting to the right conversation has to go through the app itself.
+  const want = focusCcd;   // captured: the tick may retarget focusCcd meanwhile
+  if (want) ccd.openSession(want, ok => trace(`session-switch ${want} -> ${ok ? 'switched' : 'refused, focused only'}`));
   if (!focusPid) { if (win && !win.isDestroyed()) win.blur(); return; }
   if (process.platform === 'win32') {
     try {

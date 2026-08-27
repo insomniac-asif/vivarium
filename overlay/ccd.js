@@ -199,23 +199,80 @@ function displayedSession() {
 // ---- activation -------------------------------------------------------------
 
 // The app registers a claude:// handler and holds a single-instance lock, so
-// handing it a URL restores and focuses the window it already has instead of
-// opening another one. Going through the shell rather than the exe directly is
-// deliberate: the packaged binary is not ours to execute.
+// handing it a URL reaches the window it already has instead of opening another
+// one. Going through the shell rather than the exe directly is deliberate: the
+// packaged binary is not ours to execute.
 //
-// Whether the app then switches to the session named in the URL is the app's
-// call, not ours — in this build that half is behind a feature gate and does
-// nothing. The focus half is reliable, so this is worth firing either way.
-function openSession(ccdSessionId) {
-  const target = /^local_[A-Za-z0-9-]{1,64}$/.test(String(ccdSessionId || ''))
-    ? ccdSessionId : 'last';
+// Two routes, and the difference matters. `code/continue?session=` reads as the
+// obvious one and only restores and focuses the window — its session-navigation
+// half sits behind a feature flag that is off, so it lands you wherever the app
+// already was. The route that actually changes session is the one below, which
+// carries no such flag. Neither is a published API, so this asks the app to
+// switch and then checks whether it did, rather than assuming.
+const ID_RE = /^local_[A-Za-z0-9-]{1,64}$/;
+const SWITCH = 'claude://claude.ai/epitaxy/';
+const FOCUS = 'claude://code/continue?session=';
+
+function fire(url) {
   try {
-    const p = spawn('rundll32.exe',
-      ['url.dll,FileProtocolHandler', 'claude://code/continue?session=' + target],
-      { detached: true, stdio: 'ignore', windowsHide: true });
+    const p = spawn('rundll32.exe', ['url.dll,FileProtocolHandler', url],
+                    { detached: true, stdio: 'ignore', windowsHide: true });
     p.unref();
     return true;
   } catch { return false; }
 }
 
-module.exports = { runningSessions, titleFor, displayedSession, openSession, alive };
+function storeFileFor(ccdSessionId) {
+  const name = ccdSessionId + '.json';
+  for (const f of storeFiles()) if (path.basename(f) === name) return f;
+  return null;
+}
+
+// When the app last put this session on screen, in ms. It stamps this itself as
+// a session becomes visible, which is what makes the check below possible.
+function focusedAt(ccdSessionId) {
+  const f = storeFileFor(ccdSessionId);
+  if (!f) return 0;
+  try { return num(readHead(f), 'lastFocusedAt') || 0; } catch { return 0; }
+}
+
+// Show a session. Only ever call this for something the user just clicked: it
+// pulls the app's single view away from whatever was on it, which is welcome as
+// an answer to a click and hostile as a background event.
+function openSession(ccdSessionId, done) {
+  if (!ID_RE.test(String(ccdSessionId || ''))) {
+    fire(FOCUS + 'last');                     // no id: just bring the app forward
+    if (done) done(false);
+    return false;
+  }
+  // Asking for the session already on screen changes nothing the app records,
+  // so establish that first — otherwise a switch that had nothing to do reads
+  // as a failure.
+  const shown = displayedSession();
+  const alreadyThere = !!shown && shown.ccdSessionId === ccdSessionId;
+  const before = focusedAt(ccdSessionId);
+  fire(SWITCH + ccdSessionId);
+  if (alreadyThere) {
+    if (done) setTimeout(() => done(true), 300);
+    return true;
+  }
+  // The app stamps the session in memory as it appears but writes the file on a
+  // delay, so a single peek a moment later reads the old value and calls a
+  // successful switch a failure. Poll instead, and give it a few seconds.
+  let waited = 0;
+  const poll = setInterval(() => {
+    waited += 600;
+    const after = focusedAt(ccdSessionId);
+    const switched = !!after && after !== before;
+    if (!switched && waited < 5000) return;
+    clearInterval(poll);
+    // if the route ever stops working — it is undocumented and a future build
+    // could gate it the way the other one is — fall back to merely surfacing
+    // the app, which is still better than a click that does nothing
+    if (!switched) fire(FOCUS + ccdSessionId);
+    if (done) done(switched);
+  }, 600);
+  return true;
+}
+
+module.exports = { runningSessions, titleFor, displayedSession, openSession, focusedAt, alive };

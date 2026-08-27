@@ -35,6 +35,13 @@ What the ecosystem does, and what Vivarium implements.
   the cost, and a context-pressure meter that turns pale past 85%. Clicking a
   row raises that session's window. The card follows the pet, refreshes every
   second while open, and hides when you move away.
+- **Rows are named after the session, not the folder**: the app names its
+  sessions, and those names are what you think in. The folder is a poor
+  substitute — every session in the desktop app can sit in the same directory,
+  which labelled them all alike. The name comes from the app's own session
+  store, matched to the running session on its id (including the ids a resumed
+  session used to answer to), and falls back to the repository or folder name
+  when there is no title. The folder still shows on the second line.
 - **Liveness is the process, not a timer**: each session records the pid of the
   process running it, so one whose window was closed or killed disappears at
   once instead of lingering for the timeout — a window that dies has no chance
@@ -45,9 +52,15 @@ What the ecosystem does, and what Vivarium implements.
   carries and the rows the tray lists come from the same pool, so they cannot
   disagree.
 - **Click = launcher** (Codex's actual behaviour): a quick tap opens the tray
-  AND raises the window of the session the pet is speaking for — whoever needs
-  input, else whoever ran most recently. Each session records its host window
-  by walking its own process ancestry.
+  AND goes to the session the pet is speaking for — whoever needs input, else
+  whoever ran most recently. Clicking a tray row goes to that row's session.
+  In the desktop app that means the session, not just the window: sessions
+  there are tabs in one window, so raising a window can only ever land you in
+  the app. The pet asks the app for the session by name through its own
+  `claude://` handler, then checks whether the app actually moved — the app
+  records which session it is showing — and falls back to simply surfacing the
+  window if it did not. Terminal sessions still raise their window by the
+  process ancestry each session records.
 - **Press and hold** (>450ms) pets instead of launching, so the two gestures
   never collide.
 - **Spawns with Claude**: a SessionStart hook starts the overlay if it is not
