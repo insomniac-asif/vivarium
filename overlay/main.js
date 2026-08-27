@@ -36,6 +36,7 @@ let focusPid = null;         // window to raise when the pet is clicked
 const FROM_HOOK = process.argv.includes('--from-hook');
 const bootedAt = Date.now();
 let emptySince = 0;
+let pinned = false;   // 'Keep still': stay put instead of patrolling
 let lastSessionStartTs = 0;
 let lastLookDir = -1;
 
@@ -210,6 +211,7 @@ function pushState() {
   if (!win || win.isDestroyed()) return;
   const state = aggregate();
   win.webContents.send('juna-state', state);
+  pinned = !!loadConfig().pinned;   // refreshed once a second, not per frame
 
   // A pet the hook started retires with the last session. One launched from
   // autostart or by hand is the user's and never self-exits. The 60s floor
@@ -305,7 +307,7 @@ function setWalking(on, dir) {
 }
 
 function tickMotion() {
-  if (!win || win.isDestroyed() || dragging) return;
+  if (!win || win.isDestroyed() || dragging || pinned) return;
   const now = Date.now();
   const dt = motion.last ? Math.min(0.08, (now - motion.last) / 1000) : 0;
   motion.last = now;
@@ -414,6 +416,8 @@ ipcMain.on('drag-start', () => {
   win.webContents.send('juna-state', { dragging: true });
   dragTimer = setInterval(() => {
     if (!win || win.isDestroyed()) return;
+    // safety net: never let a lost release strand the pet on the cursor
+    if (Date.now() - pressStarted > 30000) { endDragNow(); return; }
     const c = screen.getCursorScreenPoint();
     win.setPosition(c.x - ox, c.y - oy);
     const dx = c.x - lastCursor.x;
@@ -422,6 +426,8 @@ ipcMain.on('drag-start', () => {
     lastCursor = c;
   }, 16);
 });
+function endDragNow() { ipcMain.emit('drag-end'); }
+
 ipcMain.on('drag-end', () => {
   dragging = false;
   if (dragTimer) { clearInterval(dragTimer); dragTimer = null; }
@@ -437,11 +443,14 @@ ipcMain.on('drag-end', () => {
     //   press+hold  -> petting
     const held = Date.now() - pressStarted;
     if (dragMoved >= 4) {
+      trace(`gesture=drag moved=${Math.round(dragMoved)}`);
       win.webContents.send('juna-state', { dragging: false });
     } else if (held < 450) {
+      trace(`gesture=tap held=${held} raise=${focusPid}`);
       win.webContents.send('juna-state', { dragging: false });
       raiseSession();
     } else {
+      trace(`gesture=hold held=${held} -> pet`);
       win.webContents.send('juna-state', { dragging: false, event: 'Petted' });
     }
   }
@@ -484,6 +493,8 @@ ipcMain.on('context-menu', () => {
     { label: 'Start with Windows', type: 'checkbox', checked: autostartEnabled(), click: (item) => setAutostart(item.checked) },
     { label: 'Stay open after the last session', type: 'checkbox',
       checked: !!loadConfig().persist, click: (item) => saveConfig({ persist: item.checked }) },
+    { label: 'Keep still', type: 'checkbox', checked: !!loadConfig().pinned,
+      click: (item) => saveConfig({ pinned: item.checked }) },
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },
   ]);
@@ -495,7 +506,14 @@ ipcMain.on('context-menu', () => {
 function beaconWrite() {
   try {
     fs.mkdirSync(STATE_DIR, { recursive: true });
-    fs.writeFileSync(PIDFILE, String(process.pid));
+    let rect = null;
+    if (win && !win.isDestroyed()) {
+      const b = win.getBounds();
+      rect = { x: b.x, y: b.y, w: b.width, h: b.height };
+    }
+    // JSON, not a bare pid: the hook only checks this file's freshness, while
+    // tooling (and the user) can now also see where the pet actually is.
+    fs.writeFileSync(PIDFILE, JSON.stringify({ pid: process.pid, rect }));
   } catch {}
 }
 function beaconClear() {
@@ -505,8 +523,9 @@ function beaconClear() {
 app.whenReady().then(() => {
   beaconWrite();
   trace(`boot pid=${process.pid} trace=on`);
-  setInterval(beaconWrite, 30000);
   createWindow();
+  // after the window exists, so the beacon can publish where the pet is
+  setInterval(beaconWrite, 2000);
 });
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', beaconClear);

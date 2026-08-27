@@ -21,7 +21,7 @@ import math
 import os
 from collections import deque
 
-from PIL import Image, ImageChops, ImageEnhance, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter
 
 CELL_W, CELL_H = 192, 208
 BOTTOM_PAD = 6
@@ -340,9 +340,10 @@ def ember(img, k):
 
 
 def pose(base, *, rot=0.0, lean=0.0, sx=1.0, sy=1.0, dx=0, dy=0, glow=1.0,
-         flip=False):
-    """One frame: squash, bend, tilt about the FEET, grade, place in the cell."""
-    img = base
+         flip=False, parts=None, masks=None):
+    """One frame: move the limbs, then squash, bend, tilt about the FEET,
+    grade, and place the result in the cell."""
+    img = pose_parts(base, parts, masks) if parts else base
     if flip:
         img = img.transpose(Image.FLIP_LEFT_RIGHT)
     if abs(sx - 1) > 0.001 or abs(sy - 1) > 0.001:
@@ -362,6 +363,58 @@ def pose(base, *, rot=0.0, lean=0.0, sx=1.0, sy=1.0, dx=0, dy=0, glow=1.0,
     return cell
 
 
+# ----------------------------------------------------------------- puppet ---
+# Whole-body motion alone reads as a cardboard cutout being waggled. Real life
+# comes from PARTS moving against the body: a wing beating, a claw lifting, a
+# tail sweeping. Each part is a soft elliptical region with a pivot at its
+# attachment; rotating about that pivot keeps pixels near the joint almost
+# still, so the seam stays hidden without any inpainting.
+#
+# Coordinates are fractions of the cutout box, so a part map travels with the
+# character rather than a pixel size.
+PARTS = {
+    "wing":  dict(cx=0.585, cy=0.670, rx=0.190, ry=0.150, px=0.452, py=0.605),
+    "tail":  dict(cx=0.860, cy=0.830, rx=0.165, ry=0.130, px=0.700, py=0.790),
+    "claw":  dict(cx=0.080, cy=0.685, rx=0.115, ry=0.105, px=0.185, py=0.640),
+    "crest": dict(cx=0.245, cy=0.115, rx=0.220, ry=0.115, px=0.260, py=0.285),
+}
+
+
+def part_mask(size, spec, feather=9):
+    """Soft-edged ellipse selecting one limb."""
+    w, h = size
+    m = Image.new("L", (w, h), 0)
+    d = ImageDraw.Draw(m)
+    cx, cy = spec["cx"] * w, spec["cy"] * h
+    rx, ry = spec["rx"] * w, spec["ry"] * h
+    d.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], fill=255)
+    return m.filter(ImageFilter.GaussianBlur(feather))
+
+
+def pose_parts(img, angles, masks):
+    """Rotate each named part about its own pivot and recomposite."""
+    if not angles:
+        return img
+    w, h = img.size
+    out = img
+    for name, ang in angles.items():
+        spec = PARTS.get(name)
+        if not spec or abs(ang) < 0.2:
+            continue
+        mask = masks[name]
+        layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        layer.paste(out, (0, 0), mask)
+        # take the limb out of the body, so the moved copy is the only one
+        base = out.copy()
+        base.putalpha(ImageChops.multiply(base.getchannel("A"),
+                                          ImageChops.invert(mask)))
+        layer = layer.rotate(ang, resample=Image.BICUBIC,
+                             center=(spec["px"] * w, spec["py"] * h))
+        base.alpha_composite(layer)
+        out = base
+    return out
+
+
 # ------------------------------------------------------------- choreography --
 def recipes():
     """state -> per-frame kwargs. Frame counts follow the v2 contract.
@@ -369,23 +422,32 @@ def recipes():
     still image. Bend carries most of the life; rotation is a seasoning."""
     r = {}
 
-    # idle — a slow breath with a drifting sway, embers banked low
+    # idle — a slow breath with a drifting sway, embers banked low; the wing
+    # and tail settle a beat behind the body so nothing moves as one board
     r["idle"] = [
-        dict(sy=1.000, sx=1.000, dy=0, lean=1.5, glow=0.86),
-        dict(sy=1.014, sx=0.994, dy=-2, lean=4.0, glow=0.92),
-        dict(sy=1.026, sx=0.988, dy=-4, lean=5.5, glow=0.99),
-        dict(sy=1.022, sx=0.990, dy=-4, lean=2.0, glow=1.02),
-        dict(sy=1.010, sx=0.996, dy=-2, lean=-2.5, glow=0.94),
-        dict(sy=0.992, sx=1.010, dy=1, lean=-4.5, glow=0.86),
+        dict(sy=1.000, sx=1.000, dy=0, lean=1.5, glow=0.86,
+             parts=dict(wing=-2, tail=1, crest=1)),
+        dict(sy=1.014, sx=0.994, dy=-2, lean=4.0, glow=0.92,
+             parts=dict(wing=-5, tail=2, crest=2)),
+        dict(sy=1.026, sx=0.988, dy=-4, lean=5.5, glow=0.99,
+             parts=dict(wing=-7, tail=3, crest=3)),
+        dict(sy=1.022, sx=0.990, dy=-4, lean=2.0, glow=1.02,
+             parts=dict(wing=-5, tail=2, crest=2)),
+        dict(sy=1.010, sx=0.996, dy=-2, lean=-2.5, glow=0.94,
+             parts=dict(wing=-1, tail=-1, crest=0)),
+        dict(sy=0.992, sx=1.010, dy=1, lean=-4.5, glow=0.86,
+             parts=dict(wing=2, tail=-2, crest=-1)),
     ]
 
     # running-right — bounding hop; the body trails the leap, then whips forward
     hop = [0, -7, -12, -8, -1, -6, -11, -4]
     trail = [-5, -10, -4, 6, 9, -3, -9, -2]
+    beat = [-16, -22, -12, 4, 12, 2, -14, -20]     # wing strokes with the hops
     r["running-right"] = [
         dict(lean=trail[i], rot=-3 - hop[i] * 0.15, dy=hop[i],
              dx=(1 if i % 2 else -1) * 2,
-             sy=1.0 - hop[i] * 0.006, sx=1.0 + hop[i] * 0.004, glow=1.06)
+             sy=1.0 - hop[i] * 0.006, sx=1.0 + hop[i] * 0.004, glow=1.06,
+             parts=dict(wing=beat[i], tail=-beat[i] * 0.25, claw=beat[i] * 0.3))
         for i in range(8)
     ]
     r["running-left"] = [dict(f, flip=True, rot=-f["rot"], lean=-f["lean"],
@@ -393,19 +455,28 @@ def recipes():
 
     # waving — rock back hard, overshoot forward, settle
     r["waving"] = [
-        dict(lean=-9, rot=-4, dy=-4, sy=1.03, sx=0.98, glow=1.12),
-        dict(lean=-19, rot=-8, dy=-12, sy=1.07, sx=0.95, glow=1.26),
-        dict(lean=7, rot=3, dy=-4, sy=1.00, sx=1.02, glow=1.14),
-        dict(lean=-2, rot=0, dy=0, sy=1.00, sx=1.00, glow=1.02),
+        dict(lean=-9, rot=-4, dy=-4, sy=1.03, sx=0.98, glow=1.12,
+             parts=dict(claw=34, wing=-10, crest=3)),
+        dict(lean=-19, rot=-8, dy=-12, sy=1.07, sx=0.95, glow=1.26,
+             parts=dict(claw=62, wing=-20, crest=6, tail=4)),
+        dict(lean=7, rot=3, dy=-4, sy=1.00, sx=1.02, glow=1.14,
+             parts=dict(claw=38, wing=-6, crest=2)),
+        dict(lean=-2, rot=0, dy=0, sy=1.00, sx=1.00, glow=1.02,
+             parts=dict(claw=6, wing=0, crest=0)),
     ]
 
     # jumping — deep anticipation, stretched launch, floating peak, land squash
     r["jumping"] = [
-        dict(sy=0.84, sx=1.15, dy=5, lean=2, glow=0.98),
-        dict(sy=1.17, sx=0.89, dy=-20, lean=-5, glow=1.18),
-        dict(sy=1.07, sx=0.96, dy=-36, lean=4, rot=-4, glow=1.30),
-        dict(sy=1.01, sx=1.00, dy=-15, lean=9, rot=5, glow=1.10),
-        dict(sy=0.87, sx=1.12, dy=3, lean=-4, glow=0.96),
+        dict(sy=0.84, sx=1.15, dy=5, lean=2, glow=0.98,
+             parts=dict(wing=10, claw=-8, tail=6)),
+        dict(sy=1.17, sx=0.89, dy=-20, lean=-5, glow=1.18,
+             parts=dict(wing=-26, claw=16, tail=-8, crest=5)),
+        dict(sy=1.07, sx=0.96, dy=-36, lean=4, rot=-4, glow=1.30,
+             parts=dict(wing=-34, claw=20, tail=-12, crest=7)),
+        dict(sy=1.01, sx=1.00, dy=-15, lean=9, rot=5, glow=1.10,
+             parts=dict(wing=-14, claw=10, tail=-4)),
+        dict(sy=0.87, sx=1.12, dy=3, lean=-4, glow=0.96,
+             parts=dict(wing=8, claw=-6, tail=5)),
     ]
 
     # failed — slump sideways, buckle, flatten into a mound, embers dying
@@ -422,22 +493,22 @@ def recipes():
 
     # waiting — cranes up at you, embers pulsing like held breath
     r["waiting"] = [
-        dict(lean=-6, rot=-2, dy=-3, sy=1.02, glow=1.00),
-        dict(lean=-12, rot=-4, dy=-7, sy=1.05, glow=1.20),
-        dict(lean=-14, rot=-5, dy=-9, sy=1.06, glow=1.30),
-        dict(lean=-12, rot=-4, dy=-7, sy=1.05, glow=1.16),
-        dict(lean=-9, rot=-3, dy=-4, sy=1.03, glow=1.00),
-        dict(lean=-6, rot=-2, dy=-2, sy=1.01, glow=0.90),
+        dict(lean=-6, rot=-2, dy=-3, sy=1.02, glow=1.00, parts=dict(wing=-4, claw=8)),
+        dict(lean=-12, rot=-4, dy=-7, sy=1.05, glow=1.20, parts=dict(wing=-10, claw=16, crest=3)),
+        dict(lean=-14, rot=-5, dy=-9, sy=1.06, glow=1.30, parts=dict(wing=-13, claw=20, crest=4)),
+        dict(lean=-12, rot=-4, dy=-7, sy=1.05, glow=1.16, parts=dict(wing=-9, claw=14, crest=2)),
+        dict(lean=-9, rot=-3, dy=-4, sy=1.03, glow=1.00, parts=dict(wing=-4, claw=8)),
+        dict(lean=-6, rot=-2, dy=-2, sy=1.01, glow=0.90, parts=dict(wing=-1, claw=3)),
     ]
 
     # running (work) — hunched into the task, fast bob, embers at full blaze
     r["running"] = [
-        dict(lean=9, rot=3, dy=0, sy=0.98, sx=1.02, glow=1.30),
-        dict(lean=13, rot=4, dy=-5, sy=1.02, sx=0.99, glow=1.42),
-        dict(lean=10, rot=3, dy=-1, sy=0.99, sx=1.01, glow=1.34),
-        dict(lean=15, rot=5, dy=-6, sy=1.03, sx=0.98, glow=1.46),
-        dict(lean=11, rot=3, dy=-2, sy=0.99, sx=1.01, glow=1.32),
-        dict(lean=8, rot=2, dy=0, sy=0.97, sx=1.02, glow=1.24),
+        dict(lean=9, rot=3, dy=0, sy=0.98, sx=1.02, glow=1.30, parts=dict(claw=14, wing=-3)),
+        dict(lean=13, rot=4, dy=-5, sy=1.02, sx=0.99, glow=1.42, parts=dict(claw=-6, wing=-6, tail=3)),
+        dict(lean=10, rot=3, dy=-1, sy=0.99, sx=1.01, glow=1.34, parts=dict(claw=12, wing=-2)),
+        dict(lean=15, rot=5, dy=-6, sy=1.03, sx=0.98, glow=1.46, parts=dict(claw=-8, wing=-7, tail=4)),
+        dict(lean=11, rot=3, dy=-2, sy=0.99, sx=1.01, glow=1.32, parts=dict(claw=10, wing=-2)),
+        dict(lean=8, rot=2, dy=0, sy=0.97, sx=1.02, glow=1.24, parts=dict(claw=-4, wing=0)),
     ]
 
     # review — bows over the finished work, small considering shifts
@@ -463,7 +534,9 @@ def look_recipe(deg):
                 dy=round(-vert * 6),
                 sy=1.0 + vert * 0.030,
                 sx=1.0 - abs(horiz) * 0.025,
-                glow=1.0 + vert * 0.06)
+                glow=1.0 + vert * 0.06,
+                parts=dict(crest=vert * 5.0, tail=-horiz * 6.0,
+                           wing=-abs(horiz) * 4.0))
 
 
 def main():
@@ -482,12 +555,14 @@ def main():
     cut = cut.filter(ImageFilter.UnsharpMask(radius=1.1, percent=125, threshold=2))
     print(f"cutout {cut.size} (scaled x{k:.3f}, sharpened)")
 
+    masks = {name: part_mask(cut.size, spec) for name, spec in PARTS.items()}
+
     made = 0
     for state, frames in recipes().items():
         d = os.path.join(args.output_dir, state)
         os.makedirs(d, exist_ok=True)
         for i, kw in enumerate(frames):
-            pose(cut, **kw).save(os.path.join(d, f"{i:02d}.png"))
+            pose(cut, masks=masks, **kw).save(os.path.join(d, f"{i:02d}.png"))
             made += 1
 
     look_dir = os.path.join(args.output_dir, "look")
@@ -495,7 +570,8 @@ def main():
     for i in range(16):
         deg = i * 22.5
         name = f"{int(deg):03d}" if deg == int(deg) else f"{deg:05.1f}"
-        pose(cut, **look_recipe(deg)).save(os.path.join(look_dir, name + ".png"))
+        pose(cut, masks=masks, **look_recipe(deg)).save(
+            os.path.join(look_dir, name + ".png"))
         made += 1
 
     print(f"rigged {made} frames -> {args.output_dir}")
