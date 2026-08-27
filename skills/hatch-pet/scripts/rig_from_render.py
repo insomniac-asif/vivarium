@@ -21,7 +21,7 @@ import math
 import os
 from collections import deque
 
-from PIL import Image, ImageChops, ImageEnhance
+from PIL import Image, ImageChops, ImageEnhance, ImageFilter
 
 CELL_W, CELL_H = 192, 208
 BOTTOM_PAD = 6
@@ -29,19 +29,38 @@ BOTTOM_PAD = 6
 
 # ---------------------------------------------------------------- cutout ----
 def knock_out(im, tol=60):
-    """Remove the chroma background by flooding from the borders."""
+    """Remove the backdrop by flooding inward from the borders.
+
+    The tolerance ADAPTS to the backdrop: studio renders use a smooth gradient,
+    so a single sampled colour plus a fixed tolerance leaves a visible
+    rectangle behind. Sampling the whole border and widening the tolerance to
+    cover its spread follows the gradient, while a contrasting subject stays
+    far outside it. (Region-growing on local difference was tried and leaks
+    straight through a dark subject's own shading.)
+    """
     im = im.convert("RGB")
     w, h = im.size
     px = im.load()
-    corners = [px[1, 1], px[w - 2, 1], px[1, h - 2], px[w - 2, h - 2]]
-    bg = tuple(sorted(c[i] for c in corners)[len(corners) // 2] for i in range(3))
+
+    ring = ([px[x, 1] for x in range(1, w - 1, max(1, w // 24))] +
+            [px[x, h - 2] for x in range(1, w - 1, max(1, w // 24))] +
+            [px[1, y] for y in range(1, h - 1, max(1, h // 24))] +
+            [px[w - 2, y] for y in range(1, h - 1, max(1, h // 24))])
+    bg = tuple(sorted(c[i] for c in ring)[len(ring) // 2] for i in range(3))
+    # robust spread: the 80th percentile, so subject pixels clipped by the crop
+    # edge cannot inflate the tolerance into erasing the whole image
+    dists = sorted((sum((c[i] - bg[i]) ** 2 for i in range(3))) ** 0.5 for c in ring)
+    spread = dists[int(len(dists) * 0.8)] if dists else 0
+    eff = max(tol, min(spread * 1.35 + 18, 110))
+
+    def is_near(c):
+        return ((c[0] - bg[0]) ** 2 + (c[1] - bg[1]) ** 2 + (c[2] - bg[2]) ** 2) < eff * eff
 
     near = bytearray(w * h)
     for y in range(h):
         row = y * w
         for x in range(w):
-            r, g, b = px[x, y]
-            if (r - bg[0]) ** 2 + (g - bg[1]) ** 2 + (b - bg[2]) ** 2 < tol * tol:
+            if is_near(px[x, y]):
                 near[row + x] = 1
 
     is_bg = bytearray(w * h)
@@ -79,8 +98,81 @@ def knock_out(im, tol=60):
                 if g > r + 20 and g > b + 20:      # green spill anywhere
                     m = (r + b) // 2
                     o[x, y] = (r, m, b, a)
+    out = drop_trapped_backdrop(out)
+    out = largest_piece(out)
     box = out.getbbox()
     return out.crop(box) if box else out
+
+
+def drop_trapped_backdrop(img, min_blob=280):
+    """Clear backdrop caught INSIDE the silhouette — e.g. the gap between a
+    tail and a leg, which a border flood can never reach.
+
+    Only large contiguous blobs of bright, colourless pixels are removed, so
+    scattered specular highlights on the subject survive.
+    """
+    w, h = img.size
+    px = img.load()
+
+    def backdroppy(c):
+        if c[3] <= 8:
+            return False
+        lum = (c[0] * 2 + c[1] * 3 + c[2]) // 6
+        return lum > 145 and (max(c[:3]) - min(c[:3])) < 30   # bright + neutral
+
+    seen = bytearray(w * h)
+    cleared = 0
+    for start in range(w * h):
+        sx, sy = start % w, start // w
+        if seen[start] or not backdroppy(px[sx, sy]):
+            continue
+        q = deque([start]); seen[start] = 1; blob = [start]
+        while q:
+            i = q.popleft(); x, y = i % w, i // w
+            for nx, ny in ((x-1, y), (x+1, y), (x, y-1), (x, y+1)):
+                if 0 <= nx < w and 0 <= ny < h:
+                    n = ny * w + nx
+                    if not seen[n] and backdroppy(px[nx, ny]):
+                        seen[n] = 1; q.append(n); blob.append(n)
+        if len(blob) >= min_blob:
+            for i in blob:
+                px[i % w, i // w] = (0, 0, 0, 0)
+            cleared += len(blob)
+    return img
+
+
+def largest_piece(img):
+    """Drop everything except the biggest connected blob — neighbouring
+    figures and stray fragments caught by the crop."""
+    w, h = img.size
+    a = img.getchannel("A").load()
+    seen = bytearray(w * h)
+    best, best_area = None, 0
+    for start in range(w * h):
+        if seen[start] or a[start % w, start // w] <= 8:
+            continue
+        q = deque([start]); seen[start] = 1; cells = [start]
+        while q:
+            i = q.popleft(); x, y = i % w, i // w
+            for nx, ny in ((x-1, y), (x+1, y), (x, y-1), (x, y+1)):
+                if 0 <= nx < w and 0 <= ny < h:
+                    n = ny * w + nx
+                    if not seen[n] and a[nx, ny] > 8:
+                        seen[n] = 1; q.append(n); cells.append(n)
+        if len(cells) > best_area:
+            best_area, best = len(cells), cells
+    if not best or best_area == w * h:
+        return img
+    keep = bytearray(w * h)
+    for i in best:
+        keep[i] = 1
+    px = img.load()
+    for y in range(h):
+        row = y * w
+        for x in range(w):
+            if not keep[row + x]:
+                px[x, y] = (0, 0, 0, 0)
+    return img
 
 
 # ------------------------------------------------------------ deformation ---
@@ -113,8 +205,8 @@ def ember(img, k):
         r = ImageChops.add(r, r.point(lambda v: int(v * (k - 1) * 0.35)))
         rgb = Image.merge("RGB", (r, g, b))
     else:
-        rgb = ImageEnhance.Brightness(rgb).enhance(0.55 + 0.45 * k)
-        rgb = ImageEnhance.Color(rgb).enhance(max(0.25, k))
+        rgb = ImageEnhance.Brightness(rgb).enhance(0.86 + 0.14 * k)
+        rgb = ImageEnhance.Color(rgb).enhance(max(0.6, k))
     out = rgb.convert("RGBA")
     out.putalpha(img.getchannel("A"))
     return out
@@ -259,7 +351,9 @@ def main():
     k = min(args.anchor_height / cut.height, (CELL_W - 26) / cut.width)
     cut = cut.resize((max(1, round(cut.width * k)), max(1, round(cut.height * k))),
                      Image.LANCZOS)
-    print(f"cutout {cut.size} (scaled x{k:.3f})")
+    # detail survives the downscale only if it is restored afterwards
+    cut = cut.filter(ImageFilter.UnsharpMask(radius=1.1, percent=125, threshold=2))
+    print(f"cutout {cut.size} (scaled x{k:.3f}, sharpened)")
 
     made = 0
     for state, frames in recipes().items():
