@@ -84,28 +84,37 @@ def knock_out(im, tol=60):
         rb = row_bg[y]
         for x in range(w):
             c = px[x, y]
-            if rb is not None:
-                d2 = sum((c[i] - rb[i]) ** 2 for i in range(3))
-                hit = d2 < (tol * 1.4) ** 2
-            else:
-                hit = is_near(c)
-            if hit:
+            ref = rb if rb is not None else bg
+            d2 = sum((c[i] - ref[i]) ** 2 for i in range(3))
+            # Measured on a real studio render: at 1.4x the crest's halo is
+            # eaten and the glow detaches from the skull (a hole in the pet's
+            # forehead); at 1.1x the subject stays whole and the leftover
+            # halo is handled as trapped backdrop below.
+            #
+            # The floor is the exception. A studio render stands the subject on
+            # a LIT ground plane whose centre is brighter than the sweep at the
+            # frame edges, so it survives the normal tolerance and hangs under
+            # the pet as a slab. Measured on this render: floor sits 66-91 away
+            # from its row's backdrop while the subject sits 164+, so the
+            # bottom band gets a wider tolerance that lands safely between.
+            limit = tol * (2.0 if y > h * 0.78 else 1.1)
+            if d2 < limit ** 2:
                 near[row + x] = 1
 
+    # Only backdrop REACHABLE from the border is cleared; interior look-alikes
+    # keep their pixels.
     is_bg = bytearray(w * h)
     q = deque()
     for x in range(w):
         for y in (0, h - 1):
             i = y * w + x
             if near[i] and not is_bg[i]:
-                is_bg[i] = 1
-                q.append(i)
+                is_bg[i] = 1; q.append(i)
     for y in range(h):
         for x in (0, w - 1):
             i = y * w + x
             if near[i] and not is_bg[i]:
-                is_bg[i] = 1
-                q.append(i)
+                is_bg[i] = 1; q.append(i)
     while q:
         i = q.popleft()
         x, y = i % w, i // w
@@ -113,47 +122,63 @@ def knock_out(im, tol=60):
             if 0 <= nx < w and 0 <= ny < h:
                 n = ny * w + nx
                 if near[n] and not is_bg[n]:
-                    is_bg[n] = 1
-                    q.append(n)
+                    is_bg[n] = 1; q.append(n)
+
+    # A light blur only, for edge anti-aliasing. (Dilate/erode closing was
+    # tried to bridge the halo and re-admitted slabs of backdrop; keeping the
+    # halo via the threshold above is the correct fix.)
+    mask = Image.frombytes("L", (w, h),
+                           bytes(0 if v else 255 for v in is_bg))
+    # keying a glow halo leaves pinprick holes scattered through textured
+    # areas; a median pass removes them (and stray single-pixel specks)
+    # without rounding off the silhouette the way a dilate would
+    mask = mask.filter(ImageFilter.MedianFilter(5))
+    mask = mask.filter(ImageFilter.GaussianBlur(0.6))
 
     out = im.convert("RGBA")
     o = out.load()
+    m = mask.load()
     for y in range(h):
         for x in range(w):
-            if is_bg[y * w + x]:
-                o[x, y] = (0, 0, 0, 0)
+            r, g, b_, _ = o[x, y]
+            av = m[x, y]
+            if av and g > r + 20 and g > b_ + 20:      # green spill anywhere
+                mid = (r + b_) // 2
+                o[x, y] = (r, mid, b_, av)
             else:
-                r, g, b, a = o[x, y]
-                if g > r + 20 and g > b + 20:      # green spill anywhere
-                    m = (r + b) // 2
-                    o[x, y] = (r, m, b, a)
-    out = drop_trapped_backdrop(out)
+                o[x, y] = (r, g, b_, av)
+
+    out = drop_trapped_backdrop(out, row_bg, bg, tol)
     out = largest_piece(out)
+    out = fill_speckle_holes(out)
     box = out.getbbox()
     return out.crop(box) if box else out
 
 
-def drop_trapped_backdrop(img, min_blob=280):
-    """Clear backdrop caught INSIDE the silhouette — e.g. the gap between a
-    tail and a leg, which a border flood can never reach.
+def drop_trapped_backdrop(img, row_bg, bg, tol, min_blob=260):
+    """Clear backdrop that survived inside the silhouette — the gap between a
+    tail and a leg, or a pocket re-admitted when the mask was closed.
 
-    Only large contiguous blobs of bright, colourless pixels are removed, so
-    scattered specular highlights on the subject survive.
+    Judged against the row's own backdrop estimate, not absolute brightness:
+    a studio sweep runs bright at the top and dark at the bottom, so a
+    brightness rule silently misses half of it.
     """
     w, h = img.size
     px = img.load()
 
-    def backdroppy(c):
+    def backdroppy(x, y):
+        c = px[x, y]
         if c[3] <= 8:
             return False
-        lum = (c[0] * 2 + c[1] * 3 + c[2]) // 6
-        return lum > 145 and (max(c[:3]) - min(c[:3])) < 30   # bright + neutral
+        ref = row_bg[y] if row_bg[y] is not None else bg
+        # same tolerance as the keying pass: a wider one here re-eats the
+        # glow halo and detaches the crest all over again
+        return sum((c[i] - ref[i]) ** 2 for i in range(3)) < (tol * 1.1) ** 2
 
     seen = bytearray(w * h)
-    cleared = 0
     for start in range(w * h):
         sx, sy = start % w, start // w
-        if seen[start] or not backdroppy(px[sx, sy]):
+        if seen[start] or not backdroppy(sx, sy):
             continue
         q = deque([start]); seen[start] = 1; blob = [start]
         while q:
@@ -161,12 +186,62 @@ def drop_trapped_backdrop(img, min_blob=280):
             for nx, ny in ((x-1, y), (x+1, y), (x, y-1), (x, y+1)):
                 if 0 <= nx < w and 0 <= ny < h:
                     n = ny * w + nx
-                    if not seen[n] and backdroppy(px[nx, ny]):
+                    if not seen[n] and backdroppy(nx, ny):
                         seen[n] = 1; q.append(n); blob.append(n)
         if len(blob) >= min_blob:
             for i in blob:
                 px[i % w, i // w] = (0, 0, 0, 0)
-            cleared += len(blob)
+    return img
+
+
+def fill_speckle_holes(img, max_hole=420):
+    """Close pinholes inside the silhouette.
+
+    Keying a glow halo leaves scattered transparent specks across textured
+    areas (the skull under a flame crest). Any small transparent region that
+    is fully enclosed by the subject is a hole, not background.
+    """
+    w, h = img.size
+    a = img.getchannel("A").load()
+    seen = bytearray(w * h)
+    q = deque()
+    for x in range(w):                       # anything reachable from the edge
+        for y in (0, h - 1):                 # is real background, not a hole
+            i = y * w + x
+            if a[x, y] <= 8 and not seen[i]:
+                seen[i] = 1; q.append(i)
+    for y in range(h):
+        for x in (0, w - 1):
+            i = y * w + x
+            if a[x, y] <= 8 and not seen[i]:
+                seen[i] = 1; q.append(i)
+    while q:
+        i = q.popleft(); x, y = i % w, i // w
+        for nx, ny in ((x-1, y), (x+1, y), (x, y-1), (x, y+1)):
+            if 0 <= nx < w and 0 <= ny < h:
+                n = ny * w + nx
+                if not seen[n] and a[nx, ny] <= 8:
+                    seen[n] = 1; q.append(n)
+
+    px = img.load()
+    checked = bytearray(w * h)
+    for start in range(w * h):
+        sx, sy = start % w, start // w
+        if checked[start] or seen[start] or a[sx, sy] > 8:
+            continue
+        qq = deque([start]); checked[start] = 1; hole = [start]
+        while qq:
+            i = qq.popleft(); x, y = i % w, i // w
+            for nx, ny in ((x-1, y), (x+1, y), (x, y-1), (x, y+1)):
+                if 0 <= nx < w and 0 <= ny < h:
+                    n = ny * w + nx
+                    if not checked[n] and not seen[n] and a[nx, ny] <= 8:
+                        checked[n] = 1; qq.append(n); hole.append(n)
+        if len(hole) <= max_hole:
+            for i in hole:
+                x, y = i % w, i // w
+                r, g, b_, _ = px[x, y]
+                px[x, y] = (r, g, b_, 255)
     return img
 
 
