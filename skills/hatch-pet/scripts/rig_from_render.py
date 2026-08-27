@@ -42,6 +42,9 @@ def knock_out(im, tol=60):
     w, h = im.size
     px = im.load()
 
+    def lum(c):
+        return (c[0] * 2 + c[1] * 3 + c[2]) / 6
+
     ring = ([px[x, 1] for x in range(1, w - 1, max(1, w // 24))] +
             [px[x, h - 2] for x in range(1, w - 1, max(1, w // 24))] +
             [px[1, y] for y in range(1, h - 1, max(1, h // 24))] +
@@ -56,11 +59,37 @@ def knock_out(im, tol=60):
     def is_near(c):
         return ((c[0] - bg[0]) ** 2 + (c[1] - bg[1]) ** 2 + (c[2] - bg[2]) ** 2) < eff * eff
 
+    # Studio backdrops are usually a smooth VERTICAL sweep, so a single
+    # sampled colour (or one luminance threshold) cannot describe them: the
+    # sweep drifts far from the corners and survives as a slab welded to the
+    # subject, which then inflates the bounding box. Estimate the backdrop
+    # PER ROW from the left/right edge strips instead, which tracks the
+    # gradient exactly. Falls back to the global colour when the subject
+    # touches a side edge (making those strips unreliable).
+    strip = max(3, w // 60)
+    row_bg = []
+    for y in range(h):
+        left = [px[x, y] for x in range(strip)]
+        right = [px[x, y] for x in range(w - strip, w)]
+        lm = tuple(sorted(c[i] for c in left)[len(left) // 2] for i in range(3))
+        rm = tuple(sorted(c[i] for c in right)[len(right) // 2] for i in range(3))
+        if sum((lm[i] - rm[i]) ** 2 for i in range(3)) > (eff * 1.5) ** 2:
+            row_bg.append(None)                     # sides disagree: unusable
+        else:
+            row_bg.append(tuple((lm[i] + rm[i]) // 2 for i in range(3)))
+
     near = bytearray(w * h)
     for y in range(h):
         row = y * w
+        rb = row_bg[y]
         for x in range(w):
-            if is_near(px[x, y]):
+            c = px[x, y]
+            if rb is not None:
+                d2 = sum((c[i] - rb[i]) ** 2 for i in range(3))
+                hit = d2 < (tol * 1.4) ** 2
+            else:
+                hit = is_near(c)
+            if hit:
                 near[row + x] = 1
 
     is_bg = bytearray(w * h)
@@ -141,31 +170,54 @@ def drop_trapped_backdrop(img, min_blob=280):
     return img
 
 
-def largest_piece(img):
-    """Drop everything except the biggest connected blob — neighbouring
-    figures and stray fragments caught by the crop."""
+def largest_piece(img, near_px=14, keep_frac=0.004):
+    """Keep the subject: the biggest blob, plus any smaller blob sitting right
+    next to it.
+
+    Glowing parts (a flame crest, an ember tip) have a soft halo that blends
+    into the backdrop; removing the halo can leave them as separate islands.
+    Dropping everything but the largest blob therefore decapitates the pet,
+    while keeping everything re-admits a neighbouring figure from a crowded
+    render. Proximity to the main blob is the discriminator.
+    """
     w, h = img.size
     a = img.getchannel("A").load()
     seen = bytearray(w * h)
-    best, best_area = None, 0
+    blobs = []
     for start in range(w * h):
         if seen[start] or a[start % w, start // w] <= 8:
             continue
-        q = deque([start]); seen[start] = 1; cells = [start]
+        q = deque([start]); seen[start] = 1
+        cells = [start]
+        x0 = x1 = start % w; y0 = y1 = start // w
         while q:
             i = q.popleft(); x, y = i % w, i // w
+            if x < x0: x0 = x
+            if x > x1: x1 = x
+            if y < y0: y0 = y
+            if y > y1: y1 = y
             for nx, ny in ((x-1, y), (x+1, y), (x, y-1), (x, y+1)):
                 if 0 <= nx < w and 0 <= ny < h:
                     n = ny * w + nx
                     if not seen[n] and a[nx, ny] > 8:
                         seen[n] = 1; q.append(n); cells.append(n)
-        if len(cells) > best_area:
-            best_area, best = len(cells), cells
-    if not best or best_area == w * h:
+        blobs.append({"cells": cells, "box": (x0, y0, x1, y1)})
+    if not blobs:
         return img
+    blobs.sort(key=lambda b: len(b["cells"]), reverse=True)
+    main = blobs[0]
+    mx0, my0, mx1, my1 = main["box"]
+    biggest = len(main["cells"])
     keep = bytearray(w * h)
-    for i in best:
+    for i in main["cells"]:
         keep[i] = 1
+    for blob in blobs[1:]:
+        x0, y0, x1, y1 = blob["box"]
+        touching = (x0 <= mx1 + near_px and x1 >= mx0 - near_px and
+                    y0 <= my1 + near_px and y1 >= my0 - near_px)
+        if touching and len(blob["cells"]) >= biggest * keep_frac:
+            for i in blob["cells"]:
+                keep[i] = 1
     px = img.load()
     for y in range(h):
         row = y * w
