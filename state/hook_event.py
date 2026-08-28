@@ -192,11 +192,18 @@ def find_host_window_pid():
         if not parent:
             break
         stem = parent[1].rsplit(".", 1)[0]
-        if "explorer" in stem or stem in ("services", "wininit", "systemd", "init"):
+        # stop at the session/init boundary. launchd is macOS pid 1, and
+        # walking past it returned launchd itself as "the window to raise".
+        if "explorer" in stem or stem in ("services", "wininit", "systemd",
+                                          "init", "launchd", "loginwindow",
+                                          "sshd", "login"):
             break
         if stem not in _RELAY:
             candidates.append(ppid)
         pid = ppid
+    # pid 1 is never a window anyone can raise
+    while candidates and candidates[-1] <= 1:
+        candidates.pop()
     return candidates[-1] if candidates else None
 
 
