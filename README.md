@@ -5,9 +5,11 @@ Desktop pets for Claude Code.
 > **Platform support.** Developed on Windows, where everything described here
 > is exercised. On macOS the statusline, the hook writer and the overlay have
 > all been run: the pet appears, tracks sessions, changes mood and patrols.
-> Not yet tested there: the hover tray and click gestures, and naming a session
-> or jumping to it — those read the desktop app's own files, which exist on
-> macOS but were empty on the machine tested. Linux is untested entirely.
+> The v2 sprite renderer draws and animates correctly there, checked by having
+> the pet capture its own window. Not yet tested on macOS: the hover tray and
+> click gestures, and naming a session or jumping to it — those read the desktop
+> app's own files, which exist on macOS but were empty on the machine tested.
+> Linux is untested entirely.
 > Where those files are missing the pet falls back to folder names and to
 > raising the app rather than the session. Reports from other platforms welcome.
 
