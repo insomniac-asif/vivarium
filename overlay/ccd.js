@@ -131,8 +131,11 @@ function parseHead(file) {
     file,
     mtime: 0,
   };
-  // a resumed session keeps its title but gets a fresh agent id, so the ids it
-  // used to answer to have to map to the same entry
+  // A resumed session keeps its title under a fresh agent id. The app records
+  // the ids it used to answer to, but writes them at the far end of a ~700KB
+  // file rather than in this header, so they are only picked up on the rare
+  // occasion they land in it. That costs nothing and is not relied on: the
+  // current id is what the header carries, and that is what we look up.
   const prior = t.match(/"priorCliSessionIds"\s*:\s*\[([^\]]*)\]/);
   const also = prior ? (prior[1].match(/[0-9a-fA-F-]{36}/g) || []) : [];
   return { cli, also, entry };
@@ -214,9 +217,13 @@ const SWITCH = 'claude://claude.ai/epitaxy/';
 const FOCUS = 'claude://code/continue?session=';
 
 function fire(url) {
+  if (process.platform !== 'win32') return false;
   try {
     const p = spawn('rundll32.exe', ['url.dll,FileProtocolHandler', url],
                     { detached: true, stdio: 'ignore', windowsHide: true });
+    // a spawn failure arrives as an event, not a throw, and an unhandled one on
+    // a child process takes the whole main process down with it
+    p.on('error', () => {});
     p.unref();
     return true;
   } catch { return false; }
@@ -242,7 +249,7 @@ function focusedAt(ccdSessionId) {
 function openSession(ccdSessionId, done) {
   if (!ID_RE.test(String(ccdSessionId || ''))) {
     fire(FOCUS + 'last');                     // no id: just bring the app forward
-    if (done) done(false);
+    if (done) done('no session id, app raised');
     return false;
   }
   // Asking for the session already on screen changes nothing the app records,
@@ -253,7 +260,9 @@ function openSession(ccdSessionId, done) {
   const before = focusedAt(ccdSessionId);
   fire(SWITCH + ccdSessionId);
   if (alreadyThere) {
-    if (done) setTimeout(() => done(true), 300);
+    // nothing to switch to: saying "switched" here would have hidden the fact
+    // that a tap on the pet was asking for the session already on screen
+    if (done) setTimeout(() => done('already showing'), 300);
     return true;
   }
   // The app stamps the session in memory as it appears but writes the file on a
@@ -270,7 +279,7 @@ function openSession(ccdSessionId, done) {
     // could gate it the way the other one is — fall back to merely surfacing
     // the app, which is still better than a click that does nothing
     if (!switched) fire(FOCUS + ccdSessionId);
-    if (done) done(switched);
+    if (done) done(switched ? 'switched' : 'refused, app raised only');
   }, 600);
   return true;
 }

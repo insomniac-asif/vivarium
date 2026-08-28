@@ -21,14 +21,15 @@ What the ecosystem does, and what Vivarium implements.
 
 ## What Vivarium implements
 
-- **Cursor-look, actually working**: when idle, the pet's gaze follows the
+- **Cursor-look, actually working**: when idle, a sprite pet's gaze follows the
   pointer through all 16 look cells (22.5° steps, 000 = up), with the
-  contract's neutral deadzone falling back to the idle loop.
-- **Petting**: a press that does not move (<4px) is a pet, not a drag —
-  sprite pets play the waving row; the built-in egg hops and flares its
-  embers for ~1.2s.
-- **Drag**: directional — the pet plays running-left/right by drag direction
-  while following the cursor.
+  contract's neutral deadzone falling back to the idle loop. The built-in egg
+  has no look frames and ignores this.
+- **Petting**: press and hold — over 450ms without moving 4px — sprite pets
+  play the waving row; the built-in egg hops and flares its embers for ~1.2s.
+  A shorter press is a tap, which is the launcher below.
+- **Drag**: directional — a sprite pet plays running-left/right by drag
+  direction while following the cursor; the egg simply follows.
 - **Session tray** (Codex attaches an activity list to its pet; this is that):
   hover the pet for ~0.4s and a card opens listing every live session — the
   project and git branch, what it is doing, how long since it moved, the model,
@@ -52,8 +53,12 @@ What the ecosystem does, and what Vivarium implements.
   carries and the rows the tray lists come from the same pool, so they cannot
   disagree.
 - **Click = launcher** (Codex's actual behaviour): a quick tap opens the tray
-  AND goes to the session the pet is speaking for — whoever needs input, else
-  whoever ran most recently. Clicking a tray row goes to that row's session.
+  and goes to the session that needs you. If none does it opens the tray and
+  leaves the choice to you rather than switching — with several sessions open
+  the freshest is almost always the one already on screen, so going to it would
+  be a click that visibly does nothing. Clicking a tray row goes to that row's
+  session; rows are listed in the order the sessions were opened, so they do
+  not reshuffle under the cursor while the card refreshes.
   In the desktop app that means the session, not just the window: sessions
   there are tabs in one window, so raising a window can only ever land you in
   the app. The pet asks the app for the session by name through its own

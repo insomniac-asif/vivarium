@@ -42,6 +42,8 @@ let pinned = false;   // 'Keep still': stay put instead of patrolling
 let lastSessionStartTs = 0;
 let lastLookDir = -1;
 let lastTracedShape = null;
+let petHit = false;      // pointer is over actual pet pixels
+let hoverSince = 0;      // when the current hover began, for the open delay
 
 if (!app.requestSingleInstanceLock()) app.exit(0);
 
@@ -217,8 +219,15 @@ function aggregate() {
     ? posts[attentionIndex]
     : live.slice().sort((a, b) => lastSeen(b) - lastSeen(a))[0];
   focusPid = speaking && speaking.host_pid ? speaking.host_pid : null;
-  const speakingId = speaking && ccd.titleFor(speaking.session_id, now * 1000);
-  focusCcd = (speakingId && speakingId.ccdSessionId) || null;
+  // What a tap on the pet should go to. Whoever needs you, if anyone does.
+  // Otherwise nothing: with several sessions open, the freshest is almost always
+  // the one already on screen, so switching to it changes nothing visible and
+  // reads as a broken click -- the tray opens on the same gesture, and choosing
+  // from it is the honest answer.
+  const single = live.length === 1;
+  const target = attentionIndex >= 0 ? posts[attentionIndex] : (single ? live[0] : null);
+  const targetId = target && ccd.titleFor(target.session_id, now * 1000);
+  focusCcd = (targetId && targetId.ccdSessionId) || null;
 
   const hour = new Date().getHours();
   currentMood = mood;
@@ -319,6 +328,11 @@ function livePool(states, now) {
 function sessionSummaries() {
   const now = Date.now() / 1000;
   return livePool(readSessionStates(), now)
+    // The card refreshes every second while open. Ordering by recency moved
+    // rows out from under the cursor mid-click; opening order does not move.
+    .slice()
+    .sort((a, b) => (a.started_at || 0) - (b.started_at || 0)
+                 || String(a.session_id).localeCompare(String(b.session_id)))
     .slice(0, 6)
     .map(s => {
       // The app names its sessions, and those names are what the user thinks in.
@@ -355,7 +369,12 @@ function ensurePanel() {
   panel = new BrowserWindow({
     width: 320, height: 200, show: false, frame: false, transparent: true,
     resizable: false, skipTaskbar: true, hasShadow: false, alwaysOnTop: true,
-    focusable: false,
+    // NOT focusable:false. That sets WS_EX_NOACTIVATE, and Windows answers a
+    // click on a window that cannot be activated by discarding the button
+    // message entirely — the renderer never sees a mousedown, so rows looked
+    // alive (they highlight on hover, because move messages are unaffected)
+    // while every click on them vanished. The card still opens without stealing
+    // focus: showPanel uses showInactive().
     webPreferences: {
       preload: path.join(__dirname, 'preload-panel.js'),
       contextIsolation: true, nodeIntegration: false, backgroundThrottling: false,
@@ -385,11 +404,26 @@ function showPanel() {
   trace('panel show requested');
   const w = ensurePanel();
   const list = sessionSummaries();
+  trace(`panel rows=${JSON.stringify(list.map(x => ({ t: x.title, ccd: x.ccd_id, pid: x.host_pid })))}`);
   trace(`panel show sessions=${list.length} ` +
         list.map(x => `${x.folder || '?'}:${x.mood}`).join(','));
   w.webContents.send('sessions', list);
   placePanel();
   if (!w.isVisible()) w.showInactive();
+}
+
+// Put the hover machinery back to a known state. Both ends latch on 'over the
+// pet' and only report changes, so if the pointer slips away unseen -- onto the
+// card, or off the window while the card was on top -- nothing ever reports
+// 'not over' again and the card can never reopen.
+function resetHover() {
+  petHit = false;
+  petOver = false;
+  hoverSince = 0;
+  if (win && !win.isDestroyed()) {
+    win.setIgnoreMouseEvents(true, { forward: true });
+    try { win.webContents.send('forget-hit'); } catch {}
+  }
 }
 
 function hidePanelSoon() {
@@ -398,6 +432,7 @@ function hidePanelSoon() {
     if (!petOver && !panelOver && panel && !panel.isDestroyed() && panel.isVisible()) {
       panel.hide();
       trace('panel hide');
+      resetHover();
     }
   }, 450);
 }
@@ -415,8 +450,10 @@ ipcMain.on('panel-size', (_e, h) => {
 ipcMain.on('panel-raise', (_e, row) => {
   const pid = row && typeof row === 'object' ? row.pid : row;
   const id = row && typeof row === 'object' ? row.ccd : null;
+  trace(`row-click pid=${pid || '-'} ccd=${id || '-'} raw=${JSON.stringify(row)}`);
   if (pid || id) { focusPid = pid || focusPid; focusCcd = id || null; raiseSession(); }
   if (panel && !panel.isDestroyed()) panel.hide();
+  resetHover();     // otherwise no later hover can reopen the card
 });
 
 function pushState() {
@@ -620,7 +657,7 @@ function raiseSession() {
   // not separate windows, so raising a window can only ever land you in the app
   // -- getting to the right conversation has to go through the app itself.
   const want = focusCcd;   // captured: the tick may retarget focusCcd meanwhile
-  if (want) ccd.openSession(want, ok => trace(`session-switch ${want} -> ${ok ? 'switched' : 'refused, focused only'}`));
+  if (want) ccd.openSession(want, how => trace(`session-switch ${want} -> ${how}`));
   if (!focusPid) { if (win && !win.isDestroyed()) win.blur(); return; }
   if (process.platform === 'win32') {
     try {
@@ -701,8 +738,6 @@ function setAutostart(on) {
 }
 
 // ---- menu -----------------------------------------------------------------
-let petHit = false;
-let hoverSince = 0;
 ipcMain.on('hit', (_e, hit) => {
   if (hit === petHit || !win || win.isDestroyed()) return;
   petHit = hit;

@@ -43,6 +43,14 @@
     document.addEventListener('mouseleave', function () {
       if (lastHit !== false) { lastHit = false; window.junaBridge.hit(false); }
     });
+    // The pointer can leave this window without a mouseleave -- it crosses onto
+    // the session card, which is a window of its own, and this page simply stops
+    // hearing about the mouse. Reporting only changes then leaves 'over the pet'
+    // latched on forever, and no later hover can reopen the card. Main clears
+    // the latch when it knows the pointer has gone elsewhere.
+    if (window.junaBridge.onForgetHit) {
+      window.junaBridge.onForgetHit(function () { lastHit = null; });
+    }
   }
 
   // Pointer events with capture, not mouse events: capture guarantees the

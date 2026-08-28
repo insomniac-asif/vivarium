@@ -7,4 +7,5 @@ contextBridge.exposeInMainWorld('junaBridge', {
   dragEnd: () => ipcRenderer.send('drag-end'),
   contextMenu: () => ipcRenderer.send('context-menu'),
   hit: (b) => ipcRenderer.send('hit', b),
+  onForgetHit: (cb) => ipcRenderer.on('forget-hit', () => cb()),
 });
