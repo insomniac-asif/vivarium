@@ -48,6 +48,42 @@ let hoverSince = 0;      // when the current hover began, for the open delay
 
 if (!app.requestSingleInstanceLock()) app.exit(0);
 
+// `electron . --capture out.png` asks the pet already running to photograph
+// itself. The window draws its own pixels, so this needs no screen-recording
+// permission from the OS and works over ssh on a machine whose display nobody
+// can see -- which is the only way to check what a pet looks like on a machine
+// you are not sitting at.
+app.on('second-instance', (_e, argv) => {
+  const file = captureTarget(argv);
+  if (file) captureTo(file);
+});
+
+// Electron mixes its own switches into argv, so the word after --capture is not
+// reliably the path. Take --capture=<path>, or the next argument that is not
+// itself a switch.
+function captureTarget(argv) {
+  for (let i = 0; i < argv.length; i++) {
+    const a = String(argv[i]);
+    if (a.startsWith('--capture=')) return a.slice(10) || null;
+    if (a === '--capture') {
+      for (let j = i + 1; j < argv.length; j++) {
+        if (!String(argv[j]).startsWith('-')) return argv[j];
+      }
+    }
+  }
+  return null;
+}
+
+function captureTo(file) {
+  if (!win || win.isDestroyed()) return;
+  win.webContents.capturePage().then(img => {
+    try {
+      fs.writeFileSync(file, img.toPNG());
+      trace(`captured ${img.getSize().width}x${img.getSize().height} -> ${file}`);
+    } catch (e) { trace(`capture failed: ${e.message}`); }
+  }).catch(e => trace(`capture failed: ${e.message}`));
+}
+
 // ---- config ---------------------------------------------------------------
 function loadConfig() {
   // strip a UTF-8 BOM — Windows tools love to add one
