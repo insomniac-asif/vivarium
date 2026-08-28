@@ -8,6 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const ccd = require('./ccd');
+const turns = require('./turns');
 
 const HOME = os.homedir();
 const STATE_DIR = path.join(HOME, '.claude', 'pets', '.state');
@@ -177,6 +178,13 @@ function sessionMood(s, now) {
   const prompt = Math.max(s.prompt_ts || 0, s.start_ts || 0);
   const active = s.active_ts || 0;
   if (notify >= stop && now - notify < 900) return 'needs_you';
+  // the transcript is the truthful account of the turn; the Stop hook does not
+  // fire in every surface, and a stale stop stamp reads as "still working"
+  if (s.turn) {
+    if (s.turn.inFlight) return 'working';
+    if (Date.now() - s.turn.finishedAt < 90000) return 'done';
+    return 'idle';
+  }
   if (stop && now - stop < 90) return 'done';
   if (now - active < 12) return 'working';                     // live heartbeat
   if (prompt > stop && now - prompt < 900) return 'working';   // turn in flight
@@ -275,6 +283,50 @@ function gitBranch(dir) {
   return null;
 }
 
+// ---- has the user seen it? -------------------------------------------------
+// A session the user has read and not given new work should stop asking for
+// attention. Nothing on disk says "read": the app records when a session was
+// brought on screen, never that someone looked at it, and stamps nothing at all
+// while the window is hidden. So this reasons from two facts and asks Windows
+// only when they are not enough.
+const SEEN_GRACE = 20000;      // let a finished session show briefly either way
+const seenCache = new Map();   // session id -> { finishedAt, seen, askedAt }
+
+function idleMs() {
+  try { return require('electron').powerMonitor.getSystemIdleTime() * 1000; }
+  catch { return 0; }
+}
+
+function seenSince(s, id, finishedAt, displayed, nowMs) {
+  if (!finishedAt) return false;
+  if (id && id.focusedAt >= finishedAt) return true;   // brought up after it finished
+  // A decision already reached for this same output stands. It has to be
+  // checked before the on-screen test below, or a session judged seen while the
+  // user was reading it would come back the moment they switched away.
+  const prior = seenCache.get(s.session_id);
+  if (prior && prior.finishedAt === finishedAt && prior.seen) return true;
+  if (!displayed) return false;
+  // It is the session on screen, but it was put there before this output
+  // arrived: either the user is sitting in front of it reading, or the window
+  // is minimised and nobody has seen anything. Only the window manager knows,
+  // and asking costs a process and about a second — so ask once per finished
+  // turn, off the tick, and show the session until the answer comes back.
+  const c = prior;
+  if (!c || c.finishedAt !== finishedAt || nowMs - c.askedAt > 60000) {
+    seenCache.set(s.session_id, { finishedAt, seen: false, askedAt: nowMs });
+    ccd.windowState(state => {
+      const cur = seenCache.get(s.session_id);
+      if (!cur || cur.finishedAt !== finishedAt) return;
+      // a machine nobody has touched is not a reader: an answer sitting on an
+      // unattended screen has not been seen
+      cur.seen = state === 'visible' && idleMs() < 300000;
+      trace(`seen? ${(s.id && s.id.title) || s.session_id.slice(0, 8)} window=${state} ` +
+            `idle=${Math.round(idleMs() / 1000)}s -> ${cur.seen ? 'read, dropping it' : 'not read, keeping it'}`);
+    });
+  }
+  return false;
+}
+
 // The live pool, deduped — the single answer to "what sessions are there?".
 // Both the tray and the pet's own session count read this, so the dots the pet
 // carries can never disagree with the rows the tray lists.
@@ -303,6 +355,8 @@ function livePool(states, now) {
         });
       })
       .filter(s => !s.ended_ts)
+      .map(s => decorate(s, now))
+      .filter(s => pending(s, now))
       .sort((a, b) => (lastSeen(b) || (b.started_at || 0) / 1000)
                     - (lastSeen(a) || (a.started_at || 0) / 1000));
   }
@@ -325,6 +379,40 @@ function livePool(states, now) {
   return unique;
 }
 
+// Everything a decision needs, read once: what the app calls this session, and
+// whether its last turn is still running.
+function decorate(s, now) {
+  s.id = ccd.titleFor(s.session_id, now * 1000);
+  s.turn = turns.turnState(s.session_id, s.cwd);
+  return s;
+}
+
+// Should the pet be carrying this session at all? It should while the session
+// is working or waiting on the user, and afterwards only until the user has
+// seen what it produced.
+function pending(s, now) {
+  const nowMs = now * 1000;
+  const notify = s.notify_ts || 0;
+  if (notify && now - notify < 900) return true;    // blocked on you: always
+  if (!s.turn) return true;                         // nothing to read: assume it matters
+  if (s.turn.inFlight) return true;                 // still working
+  if (nowMs - s.turn.finishedAt < SEEN_GRACE) return true;
+  const displayedId = displayedCcdId(nowMs);
+  const displayed = !!(s.id && s.id.ccdSessionId && s.id.ccdSessionId === displayedId);
+  return !seenSince(s, s.id, s.turn.finishedAt, displayed, nowMs);
+}
+
+// Which session the app has on screen. One scan of the store headers, held for
+// ten seconds — it only changes when the user switches, and the grace period
+// on a just-finished session is longer than the staleness.
+let displayedCache = { at: 0, id: null };
+function displayedCcdId(nowMs) {
+  if (nowMs - displayedCache.at < 10000) return displayedCache.id;
+  const d = ccd.displayedSession();
+  displayedCache = { at: nowMs, id: d ? d.ccdSessionId : null };
+  return displayedCache.id;
+}
+
 function sessionSummaries() {
   const now = Date.now() / 1000;
   return livePool(readSessionStates(), now)
@@ -339,7 +427,7 @@ function sessionSummaries() {
       // The folder is a poor substitute: every session in the desktop app can
       // share one working directory, so naming rows after it labelled them all
       // "Desktop". Fall back to the folder only when there is no title.
-      const id = ccd.titleFor(s.session_id, now * 1000);
+      const id = s.id || ccd.titleFor(s.session_id, now * 1000);
       return {
         title: (id && id.title) || null,
         folder: projectName(s.cwd),

@@ -43,6 +43,22 @@ What the ecosystem does, and what Vivarium implements.
   store, matched to the running session on its id (including the ids a resumed
   session used to answer to), and falls back to the repository or folder name
   when there is no title. The folder still shows on the second line.
+- **It stops asking once you have read it**: a session drops off the pet when
+  its last turn is finished and you have seen that output. "Seen" means the app
+  brought that session on screen after the output arrived — or it is the
+  session on screen now and the window is genuinely up, which is checked once
+  per finished turn rather than on a timer, because asking the window manager
+  costs about a second. An unattended machine does not count as reading: if
+  nobody has touched the keyboard since the turn ended, the answer sitting on
+  screen has not been seen. A session that is working, or waiting on you, is
+  never hidden by any of this, and anything that cannot be determined shows —
+  a pet that lingers is a nuisance, one that hides work you are waiting on is
+  useless. Give a hidden session new work and it comes straight back.
+- **Turn state comes from the transcript, not the Stop hook**: the hook does
+  not fire in every Claude Code surface — state files here carried prompt
+  stamps minutes old beside stop stamps hours old — so "working" and "done"
+  are read from the last assistant record's stop reason instead, which is
+  written as the turn happens. Only the tail of the file is ever read.
 - **Liveness is the process, not a timer**: each session records the pid of the
   process running it, so one whose window was closed or killed disappears at
   once instead of lingering for the timeout — a window that dies has no chance

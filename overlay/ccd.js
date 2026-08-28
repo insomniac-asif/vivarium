@@ -128,6 +128,11 @@ function parseHead(file) {
     title: field(t, 'title'),
     ccdSessionId: field(t, 'sessionId'),
     cwd: field(t, 'cwd'),
+    // when the app last brought this session on screen. An edge, not a state:
+    // it is stamped as a session becomes visible and never refreshed while the
+    // user keeps reading, so it answers "was it shown since X", not "is it
+    // showing now".
+    focusedAt: num(t, 'lastFocusedAt') || 0,
     file,
     mtime: 0,
   };
@@ -184,6 +189,11 @@ function titleFor(sessionId, now) {
 // Which session the app is actually showing. The app stamps lastFocusedAt when a
 // session becomes visible, so this is its own answer rather than our guess.
 function displayedSession() {
+  // Reads every header, because any session can be the one on screen and only
+  // the header says when it was last put there. Measured at ~33ms for 355
+  // files; narrowing it by mtime was tried and came out slower, since statting
+  // them all costs more than reading heads the OS has already cached. The
+  // caller holds the answer for several seconds rather than asking often.
   let best = null;
   for (const f of storeFiles()) {
     let t;
@@ -284,4 +294,30 @@ function openSession(ccdSessionId, done) {
   return true;
 }
 
-module.exports = { runningSessions, titleFor, displayedSession, openSession, focusedAt, alive };
+// Is the app's window on screen, or minimised? There is no file that says so --
+// the app persists nothing when it is hidden -- and asking Windows costs a
+// process and about a second, so this is never called on the tick: only once,
+// when a session has just finished and the answer decides whether the user can
+// be assumed to have seen it.
+function windowState(done) {
+  if (process.platform !== 'win32') return done(null);
+  const script =
+    "Add-Type -Name W -Namespace P -MemberDefinition " +
+    "'[DllImport(\"user32.dll\")]public static extern bool IsIconic(IntPtr h);'; " +
+    "$p = Get-Process Claude -ErrorAction SilentlyContinue | " +
+    "Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1; " +
+    "if ($p) { if ([P.W]::IsIconic($p.MainWindowHandle)) { 'minimized' } else { 'visible' } } " +
+    "else { 'noWindow' }";
+  let out = '';
+  let p;
+  try {
+    p = spawn('powershell', ['-NoProfile', '-Command', script],
+              { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch { return done(null); }
+  p.on('error', () => done(null));
+  p.stdout.on('data', d => { out += d; });
+  p.on('close', () => done(out.trim() || null));
+}
+
+module.exports = { runningSessions, titleFor, displayedSession, openSession,
+                   focusedAt, windowState, alive };
