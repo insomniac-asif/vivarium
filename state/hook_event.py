@@ -213,29 +213,11 @@ def ensure_overlay():
     subprocess.Popen([exe, overlay, "--from-hook"], **kwargs)
 
 
-def capture(data):
-    """Dump a raw hook payload when ~/.claude/pets/.state/CAPTURE exists.
-
-    What Claude Code actually puts in a hook's stdin is worth knowing exactly
-    rather than assuming; drop the marker file, take one turn, read the dump.
-    """
-    marker = os.path.join(STATE_DIR, "CAPTURE")
-    if not os.path.exists(marker):
-        return
-    path = os.path.join(STATE_DIR, "payload-%s.json" % (data.get("hook_event_name") or "x"))
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-
-
 def main():
     try:
         data = json.load(sys.stdin)
     except Exception:
         return
-    try:
-        capture(data)
-    except Exception:
-        pass
     try:
         record(data)
     except Exception:

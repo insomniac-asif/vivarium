@@ -1,9 +1,9 @@
 // Whether a session is mid-turn, and when it last finished one.
 //
-// The obvious source would be the Stop hook, but it does not fire in every
-// Claude Code surface -- on this machine state files carry prompt stamps from
-// minutes ago beside stop stamps from hours ago -- so a pet that trusted it
-// would think a session had been working since breakfast.
+// The Stop hook answers this and is what main.js asks first. This is the
+// tiebreaker for the one case the hook cannot express: a Stop that never
+// arrived is indistinguishable from a turn still running, and a session stuck
+// that way would sit on the pet claiming to work until its process exited.
 //
 // The transcript is written as the turn happens and is always there. The last
 // assistant record on the main chain carries a stop_reason: a finished turn

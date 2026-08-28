@@ -54,11 +54,12 @@ What the ecosystem does, and what Vivarium implements.
   never hidden by any of this, and anything that cannot be determined shows —
   a pet that lingers is a nuisance, one that hides work you are waiting on is
   useless. Give a hidden session new work and it comes straight back.
-- **Turn state comes from the transcript, not the Stop hook**: the hook does
-  not fire in every Claude Code surface — state files here carried prompt
-  stamps minutes old beside stop stamps hours old — so "working" and "done"
-  are read from the last assistant record's stop reason instead, which is
-  written as the turn happens. Only the tail of the file is ever read.
+- **Turn state comes from the Stop hook, with the transcript as a tiebreaker**:
+  the hook is the supported answer. Its one blind spot is that a hook which
+  never arrived looks identical to a turn still running, and a session stuck
+  that way would claim to be working forever — so when the stamps say a turn is
+  in flight, the tail of the transcript is read to see whether the last
+  assistant record actually finished.
 - **Liveness is the process, not a timer**: each session records the pid of the
   process running it, so one whose window was closed or killed disappears at
   once instead of lingering for the timeout — a window that dies has no chance

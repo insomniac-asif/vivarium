@@ -178,8 +178,7 @@ function sessionMood(s, now) {
   const prompt = Math.max(s.prompt_ts || 0, s.start_ts || 0);
   const active = s.active_ts || 0;
   if (notify >= stop && now - notify < 900) return 'needs_you';
-  // the transcript is the truthful account of the turn; the Stop hook does not
-  // fire in every surface, and a stale stop stamp reads as "still working"
+  // hook stamps first, with the transcript settling a Stop that never arrived
   if (s.turn) {
     if (s.turn.inFlight) return 'working';
     if (Date.now() - s.turn.finishedAt < 90000) return 'done';
@@ -379,11 +378,30 @@ function livePool(states, now) {
   return unique;
 }
 
+// Whether a turn is running, and when the last one ended.
+//
+// The Stop hook is the supported answer and is used first. It has one blind
+// spot: a hook that never arrived looks exactly like a turn still running, and
+// a session stuck that way would sit on the pet forever claiming to work. The
+// transcript is written as the turn happens, so it settles that one case.
+function turnOf(s) {
+  const stop = (s.stop_ts || 0) * 1000;
+  const prompt = Math.max(s.prompt_ts || 0, s.start_ts || 0) * 1000;
+  const t = s.turn;                          // from the transcript, may be null
+  if (!stop && !prompt) return t;            // no hook ever ran here
+  if (prompt > stop) {
+    if (t && !t.inFlight && t.finishedAt >= prompt) return t;   // the Stop was lost
+    return { inFlight: true, finishedAt: stop };
+  }
+  return { inFlight: false, finishedAt: Math.max(stop, t ? t.finishedAt : 0) };
+}
+
 // Everything a decision needs, read once: what the app calls this session, and
 // whether its last turn is still running.
 function decorate(s, now) {
   s.id = ccd.titleFor(s.session_id, now * 1000);
   s.turn = turns.turnState(s.session_id, s.cwd);
+  s.turn = turnOf(s);
   return s;
 }
 

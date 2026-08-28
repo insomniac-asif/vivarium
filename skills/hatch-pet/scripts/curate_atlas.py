@@ -13,7 +13,9 @@ import sys
 from collections import deque
 from PIL import Image
 
-RUN = os.path.expanduser(r"~/.claude/pets/.hatch/huma")
+# the pet being hatched; pass its name so this is not wired to one pet
+RUN = os.path.expanduser(os.environ.get("HATCH_RUN")
+                         or r"~/.claude/pets/.hatch/" + (sys.argv[1] if len(sys.argv) > 1 else "pet"))
 LIB = os.path.join(RUN, "library")
 OUT = os.path.join(RUN, "frames-final")
 CELL_W, CELL_H = 192, 208
