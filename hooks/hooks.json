@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PLUGIN_ROOT}/state/hook_event.py\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/state/hook_event.py\"",
             "timeout": 5
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PLUGIN_ROOT}/state/hook_event.py\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/state/hook_event.py\"",
             "timeout": 5
           }
         ]
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PLUGIN_ROOT}/state/hook_event.py\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/state/hook_event.py\"",
             "timeout": 5
           }
         ]
@@ -38,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PLUGIN_ROOT}/state/hook_event.py\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/state/hook_event.py\"",
             "timeout": 10
           }
         ]
@@ -49,7 +49,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PLUGIN_ROOT}/state/hook_event.py\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/state/hook_event.py\"",
             "timeout": 5
           }
         ]

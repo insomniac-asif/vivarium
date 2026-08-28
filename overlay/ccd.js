@@ -20,12 +20,17 @@ const { spawn } = require('child_process');
 
 const HOME = os.homedir();
 const REGISTRY = path.join(HOME, '.claude', 'sessions');
+// Where the desktop app keeps its sessions, per platform. Confirmed present on
+// Windows and on macOS 26.5; the Linux entry is the standard Electron userData
+// location and has not been checked against a real install.
 const STORE_ROOTS = [
   path.join(HOME, 'AppData', 'Roaming', 'Claude', 'claude-code-sessions'),
-  // the app ships as an MSIX package, so the Roaming path above is a redirect;
-  // this is where it really lands when the redirect is not readable
+  // the Windows app ships as an MSIX package, so the Roaming path above is a
+  // redirect; this is where it really lands when the redirect is not readable
   path.join(HOME, 'AppData', 'Local', 'Packages', 'Claude_pzs8sxrjxfjjc',
             'LocalCache', 'Roaming', 'Claude', 'claude-code-sessions'),
+  path.join(HOME, 'Library', 'Application Support', 'Claude', 'claude-code-sessions'),
+  path.join(HOME, '.config', 'Claude', 'claude-code-sessions'),
 ];
 
 function alive(pid) {
@@ -226,10 +231,21 @@ const ID_RE = /^local_[A-Za-z0-9-]{1,64}$/;
 const SWITCH = 'claude://claude.ai/epitaxy/';
 const FOCUS = 'claude://code/continue?session=';
 
+// Hand a URL to whatever the desktop registers as the claude:// handler. Every
+// platform has a way to do this and no two of them are the same. Going through
+// the shell's opener rather than the app binary is deliberate: the packaged
+// binary is not ours to execute.
+const OPENER = {
+  win32:  ['rundll32.exe', ['url.dll,FileProtocolHandler']],
+  darwin: ['open', []],
+  linux:  ['xdg-open', []],
+};
+
 function fire(url) {
-  if (process.platform !== 'win32') return false;
+  const opener = OPENER[process.platform];
+  if (!opener) return false;
   try {
-    const p = spawn('rundll32.exe', ['url.dll,FileProtocolHandler', url],
+    const p = spawn(opener[0], opener[1].concat([url]),
                     { detached: true, stdio: 'ignore', windowsHide: true });
     // a spawn failure arrives as an event, not a throw, and an unhandled one on
     // a child process takes the whole main process down with it
@@ -300,6 +316,9 @@ function openSession(ccdSessionId, done) {
 // when a session has just finished and the answer decides whether the user can
 // be assumed to have seen it.
 function windowState(done) {
+  // Windows only for now: the equivalents are AppleScript on macOS and a
+  // toolkit-specific query on Linux. A null answer means 'cannot tell', which
+  // callers already treat as 'do not assume it was read'.
   if (process.platform !== 'win32') return done(null);
   const script =
     "Add-Type -Name W -Namespace P -MemberDefinition " +

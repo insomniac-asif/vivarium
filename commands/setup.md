@@ -10,7 +10,7 @@ Set up Vivarium for this user. Work through these steps, reporting progress:
 
 3. **Statusline pet.** Ask the user whether they want the text pet in the Claude Code status line. If yes, set in `~/.claude/settings.json`:
    ```json
-   "statusLine": { "type": "command", "command": "python \"<plugin-root>/statusline/pet.py\"" }
+   "statusLine": { "type": "command", "command": "python3 \"<plugin-root>/statusline/pet.py\"" }
    ```
    (Escape backslashes on Windows or use forward slashes.) The statusline script doubles as the overlay's heartbeat, so recommend enabling it even if they only want the desktop pet.
 

@@ -119,6 +119,24 @@ def _proc_parents():
                     continue
         except Exception:
             pass
+        if not out:
+            # macOS has no /proc. ps is in the base system on every unix and
+            # answers the same question; comm may be a full path, so take the
+            # last component.
+            try:
+                ps = subprocess.run(["ps", "-Ao", "pid=,ppid=,comm="],
+                                    capture_output=True, text=True, timeout=5)
+                for line in ps.stdout.splitlines():
+                    parts = line.split(None, 2)
+                    if len(parts) < 3:
+                        continue
+                    try:
+                        out[int(parts[0])] = (int(parts[1]),
+                                              parts[2].rsplit("/", 1)[-1].strip().lower())
+                    except ValueError:
+                        continue
+            except Exception:
+                pass
     return out
 
 
