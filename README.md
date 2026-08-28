@@ -2,6 +2,14 @@
 
 Desktop pets for Claude Code.
 
+> **Platform support.** The overlay is developed and tested on Windows. The
+> statusline pet and the hook writer are tested on macOS and work there; the
+> overlay itself has not been run on macOS or Linux yet, and the features that
+> name a session and jump to it read the desktop app's own files, which have
+> been located on Windows and macOS but not Linux. On a platform where those
+> are missing the pet falls back to folder names and to raising the app rather
+> than the session. Reports from other platforms are welcome.
+
 A transparent, always-on-top desktop pet that reacts to your live Claude Code
 sessions — working, waiting on you, finishing a turn, idling, sleeping — plus a
 text pet for the status line, and a **hatch-pet skill** that lets Claude

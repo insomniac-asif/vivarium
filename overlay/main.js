@@ -487,6 +487,9 @@ function ensurePanel() {
     },
   });
   panel.setAlwaysOnTop(true, 'screen-saver');
+  if (process.platform !== 'win32') {
+    try { panel.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch {}
+  }
   panel.setMenu(null);
   panel.loadFile('sessions.html');
   panel.on('closed', () => { panel = null; });
@@ -737,6 +740,11 @@ function createWindow() {
     },
   });
   win.setAlwaysOnTop(true, 'screen-saver');
+  // Without this the pet lives on one desktop only: switch Space, or let an app
+  // go fullscreen, and it is gone. Windows has no equivalent and needs none.
+  if (process.platform !== 'win32') {
+    try { win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch {}
+  }
   win.setMenu(null);
   pinned = !!cfg.pinned;      // honour it from the first frame, not a second in
   clampToWorkArea();
@@ -907,6 +915,12 @@ function beaconClear() {
 }
 
 app.whenReady().then(() => {
+  // An overlay is not an application the user switches to: no Dock icon, no
+  // menu bar. setMenu(null) covers Windows and Linux but does nothing on macOS.
+  if (process.platform === 'darwin') {
+    try { app.dock.hide(); } catch {}
+    try { Menu.setApplicationMenu(null); } catch {}
+  }
   beaconWrite();
   trace(`boot pid=${process.pid} trace=on`);
   createWindow();
