@@ -73,7 +73,7 @@ def context_pct(data):
     if pct is not None and 0 <= pct <= 100:
         return min(99, int(pct))
     used = find_number(data, ["used_tokens", "tokens_used", "input_tokens", "context_used"])
-    total = find_number(data, ["context_window", "context_window_size", "max_tokens", "total_tokens"])
+    total = find_number(data, ["context_window", "context_window_size"])
     if used is not None:
         window = total if total and total > 1000 else CONTEXT_WINDOW
         return min(99, int(100 * used / window))
@@ -152,7 +152,9 @@ _HB_CACHE = STATE_HOME
 
 
 def write_heartbeat(sid, now, pct, model, cwd, cost, lv):
-    """Per-session state file consumed by the juna-desktop overlay."""
+    """Per-session state file consumed by the overlay."""
+    if not sid or sid == "unknown":
+        return                        # no session to attribute this to
     try:
         os.makedirs(_HB_CACHE, exist_ok=True)
         path = os.path.join(_HB_CACHE, f"{sid}.json")

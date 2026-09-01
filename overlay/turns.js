@@ -71,6 +71,9 @@ function turnState(sessionId, cwd) {
   if (hit && hit.size === st.size && hit.mtime === st.mtimeMs) return hit.state;
   let state = null;
   try { state = scan(readTail(file, st.size)); } catch {}
+  // when the file last grew: a session that has written since it asked for
+  // something has moved on from asking
+  if (state) state.writtenAt = st.mtimeMs;
   cache.set(sessionId, { size: st.size, mtime: st.mtimeMs, state });
   return state;
 }

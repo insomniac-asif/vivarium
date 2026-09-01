@@ -138,6 +138,7 @@ function parseHead(file) {
     // user keeps reading, so it answers "was it shown since X", not "is it
     // showing now".
     focusedAt: num(t, 'lastFocusedAt') || 0,
+    model: field(t, 'model'),
     file,
     mtime: 0,
   };

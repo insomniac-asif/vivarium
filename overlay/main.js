@@ -43,10 +43,19 @@ let pinned = false;   // 'Keep still': stay put instead of patrolling
 let lastSessionStartTs = 0;
 let lastLookDir = -1;
 let lastTracedShape = null;
+let runningCount = 0;        // interactive sessions the CLI says are running
+let menuClosedAt = 0;        // a click that dismisses the menu is not a tap
 let petHit = false;      // pointer is over actual pet pixels
 let hoverSince = 0;      // when the current hover began, for the open delay
 
 if (!app.requestSingleInstanceLock()) app.exit(0);
+
+// A capture request with no pet running is an error, not a launch: nobody
+// asked for a pet, and the caller is waiting for a file that would never come.
+if (captureTarget(process.argv)) {
+  process.stderr.write('vivarium: no pet is running to capture\n');
+  app.exit(2);
+}
 
 // `electron . --capture out.png` asks the pet already running to photograph
 // itself. The window draws its own pixels, so this needs no screen-recording
@@ -209,7 +218,12 @@ function sessionMood(s, now) {
   // Derive from whichever stamps exist: the statusline heartbeat (active_ts)
   // is the freshest signal but stops during long tool runs, so turn stamps
   // carry the state the rest of the time.
-  const notify = s.notify_ts || (s.event === 'Notification' ? s.event_ts : 0) || 0;
+  let notify = s.notify_ts || (s.event === 'Notification' ? s.event_ts : 0) || 0;
+  // a login toast is not a request for attention
+  if (s.notify_type && !/permission|idle|elicit|input|approv|question/i.test(String(s.notify_type))) notify = 0;
+  // and a request that has been answered is over: the session wrote to its
+  // transcript after asking
+  if (notify && s.turn && s.turn.writtenAt && s.turn.writtenAt / 1000 > notify + 1) notify = 0;
   const stop = s.stop_ts || 0;
   const prompt = Math.max(s.prompt_ts || 0, s.start_ts || 0);
   const active = s.active_ts || 0;
@@ -234,11 +248,16 @@ const PRECEDENCE = ['needs_you', 'working', 'done', 'idle', 'asleep'];
 function aggregate() {
   const now = Date.now() / 1000;
   const states = readSessionStates();
-  let mood = 'asleep';
+  const live = livePool(states, now);
+  // Everything the pet expresses -- mood, dots, the jump on a new session --
+  // comes from the same pool the tray lists. Reading every file on disk here
+  // had the pet animating 'working' for a session that had ended, with an
+  // empty tray under it.
+  let mood = live.length ? 'idle' : 'asleep';
   let lead = null;
-  let sessions = 0;
+  let sessions = live.length;
   let sessionStart = false;
-  for (const s of states) {
+  for (const s of live) {
     const m = sessionMood(s, now);
     if (PRECEDENCE.indexOf(m) < PRECEDENCE.indexOf(mood)) mood = m;
     if (!lead || (s.active_ts || 0) > (lead.active_ts || 0)) lead = s;
@@ -247,8 +266,7 @@ function aggregate() {
       sessionStart = true;
     }
   }
-  const live = livePool(states, now);
-  sessions = live.length;
+  runningCount = ccd.runningSessions().filter(r => !r.kind || r.kind === 'interactive').length;
   // Locomotion patrols one post per session, so the pool must be ordered by
   // something stable — sorting by recency would reshuffle the posts every time
   // a session took a turn and leave the pet skating between them.
@@ -347,14 +365,17 @@ function seenSince(s, id, finishedAt, displayed, nowMs) {
   // and asking costs a process and about a second — so ask once per finished
   // turn, off the tick, and show the session until the answer comes back.
   const c = prior;
-  if (!c || c.finishedAt !== finishedAt || nowMs - c.askedAt > 60000) {
+  // Ask once per finished turn. Ask again only when the user has just come
+  // back to the machine, which is the one thing that can change the answer.
+  const justBack = c && idleMs() < 15000 && nowMs - c.askedAt > 120000;
+  if (!c || c.finishedAt !== finishedAt || justBack) {
     seenCache.set(s.session_id, { finishedAt, seen: false, askedAt: nowMs });
     ccd.windowState(state => {
       const cur = seenCache.get(s.session_id);
       if (!cur || cur.finishedAt !== finishedAt) return;
-      // a machine nobody has touched is not a reader: an answer sitting on an
-      // unattended screen has not been seen
-      cur.seen = state === 'visible' && idleMs() < 300000;
+      // a machine nobody has touched since the turn ended is not a reader: an
+      // answer sitting on an unattended screen has not been seen
+      cur.seen = state === 'visible' && idleMs() < (Date.now() - finishedAt);
       trace(`seen? ${(s.id && s.id.title) || s.session_id.slice(0, 8)} window=${state} ` +
             `idle=${Math.round(idleMs() / 1000)}s -> ${cur.seen ? 'read, dropping it' : 'not read, keeping it'}`);
     });
@@ -382,7 +403,7 @@ function livePool(states, now) {
         return Object.assign({}, st || {}, {
           session_id: r.sessionId,
           owner_pid: r.pid,
-          cwd: (st && st.cwd) || r.cwd,
+          cwd: r.cwd || (st && st.cwd),
           started_at: r.startedAt,
           // running, but it has not reported anything yet -- a brand new session,
           // or one whose hooks are not installed
@@ -425,11 +446,12 @@ function turnOf(s) {
   const prompt = Math.max(s.prompt_ts || 0, s.start_ts || 0) * 1000;
   const t = s.turn;                          // from the transcript, may be null
   if (!stop && !prompt) return t;            // no hook ever ran here
+  const writtenAt = t ? t.writtenAt || 0 : 0;
   if (prompt > stop) {
     if (t && !t.inFlight && t.finishedAt >= prompt) return t;   // the Stop was lost
-    return { inFlight: true, finishedAt: stop };
+    return { inFlight: true, finishedAt: stop, writtenAt };
   }
-  return { inFlight: false, finishedAt: Math.max(stop, t ? t.finishedAt : 0) };
+  return { inFlight: false, finishedAt: Math.max(stop, t ? t.finishedAt : 0), writtenAt };
 }
 
 // Everything a decision needs, read once: what the app calls this session, and
@@ -487,9 +509,9 @@ function sessionSummaries() {
         folder: projectName(s.cwd),
         branch: s.cwd ? gitBranch(s.cwd) : null,
         mood: sessionMood(s, now),
-        age: now - lastSeen(s),
+        age: now - (lastSeen(s) || (s.started_at || 0) / 1000 || now),
         ctx: typeof s.ctx === 'number' ? s.ctx : null,
-        model: s.model ? String(s.model).toLowerCase() : null,
+        model: (s.model || (id && id.model)) ? String(s.model || id.model).toLowerCase() : null,
         cost: typeof s.cost === 'number' ? s.cost : null,
         host_pid: s.host_pid || null,
         ccd_id: (id && id.ccdSessionId) || null,
@@ -628,14 +650,31 @@ function pushState() {
   let readable = true;
   try { fs.readdirSync(STATE_DIR); } catch { readable = false; }
   if (!readable) { emptySince = 0; return; }
-  if (liveSessions > 0) { emptySince = 0; return; }
+  if (runningCount > 0 || liveSessions > 0) { emptySince = 0; return; }
   if (!emptySince) emptySince = Date.now();
-  else if (Date.now() - emptySince > 90000) app.quit();
+  else if (Date.now() - emptySince > 90000) { trace('retire: no running sessions for 90s'); app.quit(); }
 }
 
 // ---- look direction (cursor following, idle only) -------------------------
 function pollLook() {
   if (!win || win.isDestroyed() || dragging) return;
+  // The pet page only learns about the pointer through move events it is
+  // forwarded, and a pointer that jumps from the pet onto the card (a window
+  // of its own) or straight off the edge never sends one. So the truth about
+  // "is the pointer over us" comes from asking the OS, which we already do
+  // here 5 times a second for the gaze.
+  if (petOver || panelOver) {
+    const c = screen.getCursorScreenPoint();
+    const inside = (b) => c.x >= b.x && c.x < b.x + b.width && c.y >= b.y && c.y < b.y + b.height;
+    const overPet = inside(win.getBounds());
+    const overPanel = !!(panel && !panel.isDestroyed() && panel.isVisible() && inside(panel.getBounds()));
+    if (!overPet && !overPanel) {
+      if (petOver) trace('hit=false (cursor left, by poll)');
+      petOver = false; panelOver = false;
+      resetHover();
+      hidePanelSoon();
+    }
+  }
   let dir = -1;
   if (currentMood === 'idle') {
     const c = screen.getCursorScreenPoint();
@@ -660,8 +699,8 @@ function pollLook() {
 // and patrols between them: one session means it mostly stays put, several
 // means it paces, and a session that needs you pins it to that session's post.
 const WALK_SPEED = 54;           // px/s — a walk, not a slide
-const DWELL_MIN = 6000;
-const DWELL_MAX = 22000;
+const DWELL_MIN = 25000;          // long enough to be a companion, not a fidget
+const DWELL_MAX = 80000;
 
 let motion = { targetX: null, dwellUntil: 0, walking: false, dir: 1, last: 0 };
 let lastWalkSent = null;
@@ -763,6 +802,7 @@ function createWindow() {
     x: pos.x,
     y: pos.y,
     transparent: true,
+    show: false,
     frame: false,
     resizable: false,
     skipTaskbar: true,
@@ -776,6 +816,7 @@ function createWindow() {
     },
   });
   win.setAlwaysOnTop(true, 'screen-saver');
+  win.showInactive();   // never steal the keyboard from the app the user is typing in
   // Without this the pet lives on one desktop only: switch Space, or let an app
   // go fullscreen, and it is gone. Windows has no equivalent and needs none.
   if (process.platform !== 'win32') {
@@ -802,13 +843,23 @@ let pressStarted = 0;
 
 function raiseSession() {
   // Codex's pet is a launcher: clicking it returns you to what it represents.
+  // Whatever happens next, the pet itself must not end up holding focus: it
+  // took it with the click, and an overlay that keeps it eats the keyboard.
+  if (win && !win.isDestroyed()) win.blur();
   if (!focusPid && !focusCcd) return;
   // Ask the app for this particular session. Sessions in the desktop app are
   // not separate windows, so raising a window can only ever land you in the app
   // -- getting to the right conversation has to go through the app itself.
   const want = focusCcd;   // captured: the tick may retarget focusCcd meanwhile
-  if (want) ccd.openSession(want, how => trace(`session-switch ${want} -> ${how}`));
-  if (!focusPid) { if (win && !win.isDestroyed()) win.blur(); return; }
+  if (want) {
+    // The app's own handler restores and focuses its window and is the only
+    // thing that can pick the session. The Win32 helper on top of it flashed
+    // the taskbar and, worse, targeted a service: for desktop sessions the
+    // ancestry walk had recorded svchost as the window.
+    ccd.openSession(want, how => trace(`session-switch ${want} -> ${how}`));
+    return;
+  }
+  if (!focusPid) return;
   if (process.platform === 'win32') {
     try {
       spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
@@ -863,6 +914,9 @@ ipcMain.on('drag-end', () => {
     if (dragMoved >= 4) {
       trace(`gesture=drag moved=${Math.round(dragMoved)}`);
       win.webContents.send('juna-state', { dragging: false });
+    } else if (held < 450 && Date.now() - menuClosedAt < 400) {
+      trace('gesture=tap swallowed: it dismissed the menu');
+      win.webContents.send('juna-state', { dragging: false });
     } else if (held < 450) {
       trace(`gesture=tap held=${held} raise=${focusPid} session=${focusCcd || '-'}`);
       win.webContents.send('juna-state', { dragging: false });
@@ -892,7 +946,10 @@ ipcMain.on('hit', (_e, hit) => {
   if (hit === petHit || !win || win.isDestroyed()) return;
   petHit = hit;
   trace(`hit=${hit}`);
-  win.setIgnoreMouseEvents(!hit, { forward: true });
+  // Linux cannot forward moves through a click-through window, so there the
+  // pet stays interactive over its whole rect -- it eats clicks on transparent
+  // pixels, which is bad, but a pet you cannot hover, menu, or quit is worse.
+  if (process.platform !== 'linux') win.setIgnoreMouseEvents(!hit, { forward: true });
   petOver = hit;
   if (hit) {
     // keep the hover clock running across brief misses at the silhouette edge,
@@ -920,15 +977,23 @@ ipcMain.on('context-menu', () => {
     },
     { type: 'separator' },
     { label: 'Reset position', click: () => { const p = defaultPosition(); win.setPosition(p.x, p.y); saveConfig({ x: p.x, y: p.y }); } },
-    { label: 'Start with Windows', type: 'checkbox', checked: autostartEnabled(), click: (item) => setAutostart(item.checked) },
+    ...(process.platform === 'win32' ? [
+      { label: 'Start with Windows', type: 'checkbox', checked: autostartEnabled(), click: (item) => setAutostart(item.checked) },
+    ] : []),
     { label: 'Stay open after the last session', type: 'checkbox',
       checked: !!loadConfig().persist, click: (item) => saveConfig({ persist: item.checked }) },
     { label: 'Keep still', type: 'checkbox', checked: !!loadConfig().pinned,
       click: (item) => saveConfig({ pinned: item.checked }) },
     { type: 'separator' },
-    { label: 'Quit', click: () => app.quit() },
+    { label: 'Quit', click: () => {
+        // Quit means quit: the SessionStart hook will not bring it back until
+        // the user starts it by hand again (which turns spawning back on).
+        saveConfig({ spawn: false });
+        trace('quit: by menu; spawn-with-Claude off until launched by hand');
+        app.quit();
+      } },
   ]);
-  menu.popup({ window: win });
+  menu.popup({ window: win, callback: () => { menuClosedAt = Date.now(); } });
 });
 
 // liveness beacon: SessionStart hooks spawn the overlay only when this file
@@ -958,7 +1023,8 @@ app.whenReady().then(() => {
     try { Menu.setApplicationMenu(null); } catch {}
   }
   beaconWrite();
-  trace(`boot pid=${process.pid} trace=on`);
+  trace(`boot pid=${process.pid} trace=on fromHook=${FROM_HOOK} argv=${JSON.stringify(process.argv.slice(1))}`);
+  if (!FROM_HOOK) saveConfig({ spawn: true });   // launched by hand: spawning with Claude is wanted again
   createWindow();
   // after the window exists, so the beacon can publish where the pet is
   setInterval(beaconWrite, 2000);

@@ -31,7 +31,9 @@ EVENT_FIELD = {
 
 def record(data):
     """Merge this event into the session's state file."""
-    sid = data.get("session_id") or "unknown"
+    sid = data.get("session_id")
+    if not sid:
+        return                        # nothing to attribute this to; do not invent a session
     os.makedirs(STATE_DIR, exist_ok=True)
     path = os.path.join(STATE_DIR, sid + ".json")
     try:
@@ -47,6 +49,9 @@ def record(data):
     field = EVENT_FIELD.get(evt)
     if field:
         state[field] = now
+    if evt == "Notification":
+        state["notify_type"] = (data.get("notification_type") or data.get("type")
+                                or data.get("title") or "")
     if evt != "SessionEnd":
         state.pop("ended_ts", None)   # resumed or still going
     if data.get("cwd"):
@@ -196,7 +201,8 @@ def find_host_window_pid():
         # walking past it returned launchd itself as "the window to raise".
         if "explorer" in stem or stem in ("services", "wininit", "systemd",
                                           "init", "launchd", "loginwindow",
-                                          "sshd", "login"):
+                                          "sshd", "login", "svchost",
+                                          "runtimebroker", "sihost"):
             break
         if stem not in _RELAY:
             candidates.append(ppid)
@@ -214,9 +220,47 @@ def ensure_overlay():
     overlay/main.js every 30s) — no process APIs, no ports. Electron's
     single-instance lock is the backstop if two hooks race.
     """
+    # Quit means quit. The pet clears this when the user quits it from its
+    # menu, and sets it again when they launch it by hand.
+    try:
+        with open(os.path.join(os.path.dirname(STATE_DIR), ".vivarium.json"),
+                  encoding="utf-8") as f:
+            if json.load(f).get("spawn") is False:
+                return
+    except Exception:
+        pass
+    # A one-shot `claude -p` run -- a scheduled job, an orchestrator's
+    # subprocess -- is not a session anyone is sitting in front of. The CLI
+    # records the kind in its registry, keyed by the process that owns it.
+    try:
+        owner = find_owner_pid()
+        if owner:
+            reg = os.path.join(os.path.expanduser("~"), ".claude", "sessions", "%d.json" % owner)
+            with open(reg, encoding="utf-8") as f:
+                kind = json.load(f).get("kind")
+            if kind and kind != "interactive":
+                return
+    except Exception:
+        pass
     try:
         if time.time() - os.path.getmtime(BEACON) < 90:
-            return          # already up and heartbeating
+            # fresh beacon, but is the process behind it alive? A crashed or
+            # killed pet leaves one that reads as alive for 90 seconds, during
+            # which no session start would bring the pet back.
+            alive = True
+            try:
+                with open(BEACON, encoding="utf-8") as f:
+                    pid = int(json.load(f).get("pid") or 0)
+                if pid > 0:
+                    os.kill(pid, 0)
+            except (ProcessLookupError, PermissionError):
+                alive = os.name == "nt" and False
+            except OSError as e:
+                alive = getattr(e, "winerror", None) != 87 and e.errno not in (3,)
+            except Exception:
+                alive = True
+            if alive:
+                return          # already up and heartbeating
     except OSError:
         pass                # missing beacon -> not running
 
