@@ -110,6 +110,19 @@ function defaultPosition() {
   return { x: wa.x + wa.width - WIN_W - 24, y: wa.y + wa.height - WIN_H - 8 };
 }
 
+// Click-through is what lets a wandering pet never eat a click meant for what
+// is under it, and `forward` is what lets it still see the pointer to notice a
+// hover. Linux has no forward: a click-through window there is simply blind,
+// and toggling it left the pet dead to the mouse after its first hover. So on
+// Linux the pet stays interactive over its whole rect -- it eats clicks on its
+// transparent pixels, which is bad, but a pet you cannot hover, menu, or quit
+// is worse.
+function clickThrough(on) {
+  if (!win || win.isDestroyed()) return;
+  if (process.platform === 'linux') return;
+  win.setIgnoreMouseEvents(on, { forward: true });
+}
+
 function clampToWorkArea() {
   if (!win || win.isDestroyed()) return;
   const b = win.getBounds();
@@ -588,7 +601,7 @@ function resetHover() {
   petOver = false;
   hoverSince = 0;
   if (win && !win.isDestroyed()) {
-    win.setIgnoreMouseEvents(true, { forward: true });
+    clickThrough(true);
     try { win.webContents.send('forget-hit'); } catch {}
   }
 }
@@ -770,7 +783,7 @@ function tickMotion() {
     }
     motion.targetX = Math.round(t);
     motion.dir = motion.targetX > b.x ? 1 : -1;
-    if (petHit) { petHit = false; win.setIgnoreMouseEvents(true, { forward: true }); }
+    if (petHit) { petHit = false; clickThrough(true); }
     trace(`walk x=${b.x} -> ${motion.targetX} sessions=${liveSessions} attention=${attentionIndex} mood=${currentMood}`);
   }
 
@@ -829,7 +842,7 @@ function createWindow() {
   screen.on('display-metrics-changed', clampToWorkArea);
   // start transparent to clicks; the renderer reports when the cursor is
   // actually over opaque pixels and we take the mouse back just for those
-  win.setIgnoreMouseEvents(true, { forward: true });
+  clickThrough(true);
   applyPet(currentPet());
   setInterval(pushState, 1000);
   setInterval(pollLook, 180);
@@ -946,10 +959,7 @@ ipcMain.on('hit', (_e, hit) => {
   if (hit === petHit || !win || win.isDestroyed()) return;
   petHit = hit;
   trace(`hit=${hit}`);
-  // Linux cannot forward moves through a click-through window, so there the
-  // pet stays interactive over its whole rect -- it eats clicks on transparent
-  // pixels, which is bad, but a pet you cannot hover, menu, or quit is worse.
-  if (process.platform !== 'linux') win.setIgnoreMouseEvents(!hit, { forward: true });
+  clickThrough(!hit);
   petOver = hit;
   if (hit) {
     // keep the hover clock running across brief misses at the silhouette edge,
