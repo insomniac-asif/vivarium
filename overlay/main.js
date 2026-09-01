@@ -36,6 +36,7 @@ let liveSessions = 0;        // sessions active in the last 30 min
 let attentionIndex = -1;     // index of the session that needs input, or -1
 let focusPid = null;         // window to raise when the pet is clicked
 let focusCcd = null;         // the app session that window should be showing
+let focusApp = false;        // the speaking session lives in the desktop app
 const FROM_HOOK = process.argv.includes('--from-hook');
 const bootedAt = Date.now();
 let emptySince = 0;
@@ -293,6 +294,7 @@ function aggregate() {
     ? posts[attentionIndex]
     : live.slice().sort((a, b) => lastSeen(b) - lastSeen(a))[0];
   focusPid = speaking && speaking.host_pid ? speaking.host_pid : null;
+  focusApp = !!(speaking && speaking.entrypoint === 'claude-desktop');
   // What a tap on the pet should go to. Whoever needs you, if anyone does.
   // Otherwise nothing: with several sessions open, the freshest is almost always
   // the one already on screen, so switching to it changes nothing visible and
@@ -416,6 +418,7 @@ function livePool(states, now) {
         return Object.assign({}, st || {}, {
           session_id: r.sessionId,
           owner_pid: r.pid,
+          entrypoint: r.entrypoint || null,
           cwd: r.cwd || (st && st.cwd),
           started_at: r.startedAt,
           // running, but it has not reported anything yet -- a brand new session,
@@ -870,6 +873,13 @@ function raiseSession() {
     // the taskbar and, worse, targeted a service: for desktop sessions the
     // ancestry walk had recorded svchost as the window.
     ccd.openSession(want, how => trace(`session-switch ${want} -> ${how}`));
+    return;
+  }
+  if (focusApp) {
+    // Nothing to switch to, but the click still means "take me to Claude":
+    // the app's handler is what reliably brings its window forward and takes
+    // the focus the click gave the pet. The Win32 helper could not, measured.
+    ccd.openSession(null, how => trace(`app-raise -> ${how}`));
     return;
   }
   if (!focusPid) return;

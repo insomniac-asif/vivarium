@@ -70,8 +70,9 @@ What the ecosystem does, and what Vivarium implements.
   carries and the rows the tray lists come from the same pool, so they cannot
   disagree.
 - **Click = launcher** (Codex's actual behaviour): a quick tap opens the tray
-  and goes to the session that needs you. If none does it opens the tray and
-  leaves the choice to you rather than switching — with several sessions open
+  and goes to the session that needs you. If none does it opens the tray,
+  brings the app forward, and leaves the choice of session to you rather than
+  switching — with several sessions open
   the freshest is almost always the one already on screen, so going to it would
   be a click that visibly does nothing. Clicking a tray row goes to that row's
   session; rows are listed in the order the sessions were opened, so they do
@@ -86,10 +87,14 @@ What the ecosystem does, and what Vivarium implements.
 - **Press and hold** (>450ms) pets instead of launching, so the two gestures
   never collide.
 - **Spawns with Claude**: a SessionStart hook starts the overlay if it is not
-  already running (liveness via a beacon file the overlay refreshes, so it is
-  never duplicated). A pet the hook started retires ~90s after the last
-  session ends; one you launched yourself, or via autostart, stays until you
-  quit it. "Stay open after the last session" pins it either way.
+  already running — judged by a beacon the overlay refreshes *and* by whether
+  the process behind it is alive, so a crashed pet does not block its own
+  replacement. Headless runs (`claude -p`, scheduled jobs) never spawn one. A
+  pet the hook started retires ~90s after the last *running* session ends;
+  one you launched yourself, or via autostart, stays until you quit it. "Stay
+  open after the last session" pins it either way.
+- **Quit means quit**: quitting from the menu also stops the hook from
+  bringing the pet back. Launching it by hand turns that back on.
 - **Click-through**: the window is transparent to the mouse except over
   actual pet pixels, so a wandering pet never eats a click meant for what is
   underneath it.
@@ -106,3 +111,9 @@ What the ecosystem does, and what Vivarium implements.
 - Feeding/XP/evolution retention mechanics.
 - Sounds and speech bubbles (voice work is parked).
 - Vertical movement: the v2 atlas has no vertical locomotion rows.
+- Click-through on Linux: Electron cannot forward pointer moves through a
+  click-through window there, so on Linux the pet stays interactive over its
+  whole rectangle. It eats clicks on its transparent pixels, which is worse
+  than the other platforms, but a pet you cannot hover, menu or quit is worse
+  still. Under WSLg the compositor also ignores the requested position and
+  the frameless/always-on-top hints; that is Weston, not the pet.
