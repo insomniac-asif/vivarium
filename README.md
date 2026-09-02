@@ -12,6 +12,11 @@ Desktop pets for Claude Code.
 > Linux is untested entirely.
 > Where those files are missing the pet falls back to folder names and to
 > raising the app rather than the session. Reports from other platforms welcome.
+>
+> **Python.** The hooks and the statusline need Python 3. They try `python3`
+> and fall back to `python`, which covers a stock python.org install on Windows
+> (no `python3`) and macOS/Linux (often no `python`). `/vivarium:setup` checks
+> before writing anything.
 
 A transparent, always-on-top desktop pet that reacts to your live Claude Code
 sessions — working, waiting on you, finishing a turn, idling, sleeping — plus a
