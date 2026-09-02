@@ -13,6 +13,10 @@
          letter-spacing: 0.14em; text-transform: uppercase; }
   .row { display: flex; gap: 10px; align-items: flex-start; padding: 9px 12px;
          border-top: 1px solid #22222a; cursor: pointer; }
+  /* a session you have already read is still here to switch to, it just is not
+     asking for anything */
+  .row.read { opacity: 0.52; }
+  .row.read:hover { opacity: 1; }
   .row:hover { background: rgba(255,120,40,0.10); }
   .dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex: none; }
   .main { flex: 1; min-width: 0; }
@@ -44,7 +48,9 @@ function ago(sec) {
 
 window.panelBridge.onSessions(function (list) {
   const rows = document.getElementById('rows');
-  document.getElementById('count').textContent = list.length ? list.length : '';
+  const wants = list.filter(s => s.pending !== false).length;
+  document.getElementById('count').textContent =
+    !list.length ? '' : (wants === list.length ? String(list.length) : wants + ' of ' + list.length);
   rows.innerHTML = '';
   if (!list.length) {
     const d = document.createElement('div');
@@ -56,7 +62,7 @@ window.panelBridge.onSessions(function (list) {
   }
   for (const s of list) {
     const row = document.createElement('div');
-    row.className = 'row';
+    row.className = s.pending === false ? 'row read' : 'row';
     const dot = document.createElement('div');
     dot.className = 'dot';
     dot.style.background = COLOR[s.mood] || '#7a7a86';

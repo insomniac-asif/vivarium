@@ -267,11 +267,12 @@ function aggregate() {
   // comes from the same pool the tray lists. Reading every file on disk here
   // had the pet animating 'working' for a session that had ended, with an
   // empty tray under it.
-  let mood = live.length ? 'idle' : 'asleep';
+  const wants = live.filter(s => s.pending);
+  let mood = wants.length ? 'idle' : 'asleep';
   let lead = null;
-  let sessions = live.length;
+  let sessions = wants.length;
   let sessionStart = false;
-  for (const s of live) {
+  for (const s of wants) {
     const m = sessionMood(s, now);
     if (PRECEDENCE.indexOf(m) < PRECEDENCE.indexOf(mood)) mood = m;
     if (!lead || (s.active_ts || 0) > (lead.active_ts || 0)) lead = s;
@@ -284,7 +285,7 @@ function aggregate() {
   // Locomotion patrols one post per session, so the pool must be ordered by
   // something stable — sorting by recency would reshuffle the posts every time
   // a session took a turn and leave the pet skating between them.
-  const posts = live.slice().sort((a, b) =>
+  const posts = wants.slice().sort((a, b) =>
     String(a.session_id || '').localeCompare(String(b.session_id || '')));
   liveSessions = posts.length;
   attentionIndex = posts.findIndex(s => sessionMood(s, now) === 'needs_you');
@@ -292,7 +293,7 @@ function aggregate() {
   // whoever needs you, else whoever ran most recently
   const speaking = attentionIndex >= 0
     ? posts[attentionIndex]
-    : live.slice().sort((a, b) => lastSeen(b) - lastSeen(a))[0];
+    : wants.slice().sort((a, b) => lastSeen(b) - lastSeen(a))[0];
   focusPid = speaking && speaking.host_pid ? speaking.host_pid : null;
   focusApp = !!(speaking && speaking.entrypoint === 'claude-desktop');
   // What a tap on the pet should go to. Whoever needs you, if anyone does.
@@ -300,8 +301,8 @@ function aggregate() {
   // the one already on screen, so switching to it changes nothing visible and
   // reads as a broken click -- the tray opens on the same gesture, and choosing
   // from it is the honest answer.
-  const single = live.length === 1;
-  const target = attentionIndex >= 0 ? posts[attentionIndex] : (single ? live[0] : null);
+  const single = wants.length === 1;
+  const target = attentionIndex >= 0 ? posts[attentionIndex] : (single ? wants[0] : null);
   const targetId = target && ccd.titleFor(target.session_id, now * 1000);
   focusCcd = (targetId && targetId.ccdSessionId) || null;
 
@@ -428,7 +429,12 @@ function livePool(states, now) {
       })
       .filter(s => !s.ended_ts)
       .map(s => decorate(s, now))
-      .filter(s => pending(s, now))
+      // Every running session stays in the pool, flagged with whether it is
+      // still asking for anything. The tray is a switcher and must list them
+      // all -- a session missing from it is a session you cannot get back to.
+      // The pet is the opposite: its mood, its dots and the posts it patrols
+      // speak only for what is still pending.
+      .map(s => { s.pending = pending(s, now); return s; })
       .sort((a, b) => (lastSeen(b) || (b.started_at || 0) / 1000)
                     - (lastSeen(a) || (a.started_at || 0) / 1000));
   }
@@ -531,6 +537,7 @@ function sessionSummaries() {
         cost: typeof s.cost === 'number' ? s.cost : null,
         host_pid: s.host_pid || null,
         ccd_id: (id && id.ccdSessionId) || null,
+        pending: s.pending !== false,
       };
     });
 }
@@ -648,7 +655,7 @@ function pushState() {
     // report the pool whenever it changes, so what the tray would list can be
     // checked without having to hover the pet to find out
     const shape = sessionSummaries()
-      .map(x => `${x.title || x.folder || '?'}:${x.mood}`).join(' | ');
+      .map(x => `${x.title || x.folder || '?'}:${x.mood}${x.pending ? '' : '(read)'}`).join(' | ');
     if (shape !== lastTracedShape) { lastTracedShape = shape; trace(`pool [${shape}]`); }
   }
 
@@ -954,12 +961,41 @@ ipcMain.on('drag-end', () => {
 
 // ---- autostart ------------------------------------------------------------
 function autostartEnabled() { return fs.existsSync(STARTUP_VBS); }
+// The plugin lives in a versioned directory that changes on every update, so a
+// Startup entry naming today's copy launches yesterday's code tomorrow -- or,
+// once the old directory is pruned, pops a Windows Script Host error box at
+// login. Two things prevent that: the pet rewrites this file every time it
+// starts, so the first session after an update heals it; and the script checks
+// the path still exists, so a copy that was pruned before that happened does
+// nothing instead of complaining.
+function writeLauncher() {
+  if (process.platform !== 'win32' || !autostartEnabled()) return;
+  try {
+    const electronCmd = path.join(__dirname, 'node_modules', '.bin', 'electron.cmd');
+    if (!fs.existsSync(electronCmd)) return;      // nothing worth pointing at yet
+    const body = autostartScript(electronCmd);
+    let current = '';
+    try { current = fs.readFileSync(STARTUP_VBS, 'utf8'); } catch {}
+    if (current !== body) fs.writeFileSync(STARTUP_VBS, body);
+  } catch {}
+}
+
+function autostartScript(electronCmd) {
+  return 'Rem Rewritten by Vivarium each time the pet starts, so this points at\r\n'
+       + 'Rem the installed copy rather than whichever one was current at setup.\r\n'
+       + 'Set fso = CreateObject("Scripting.FileSystemObject")\r\n'
+       + 'exe = "' + electronCmd + '"\r\n'
+       + 'app = "' + __dirname + '"\r\n'
+       + 'If fso.FileExists(exe) Then\r\n'
+       + '  CreateObject("WScript.Shell").Run """" & exe & """ """ & app & """", 0, False\r\n'
+       + 'End If\r\n';
+}
+
 function setAutostart(on) {
   try {
     if (on) {
-      const electronCmd = path.join(__dirname, 'node_modules', '.bin', 'electron.cmd');
       fs.writeFileSync(STARTUP_VBS,
-        'CreateObject("WScript.Shell").Run """' + electronCmd + '"" ""' + __dirname + '""", 0, False\r\n');
+        autostartScript(path.join(__dirname, 'node_modules', '.bin', 'electron.cmd')));
     } else if (fs.existsSync(STARTUP_VBS)) fs.unlinkSync(STARTUP_VBS);
   } catch {}
 }
@@ -1045,6 +1081,7 @@ app.whenReady().then(() => {
   beaconWrite();
   trace(`boot pid=${process.pid} trace=on fromHook=${FROM_HOOK} argv=${JSON.stringify(process.argv.slice(1))}`);
   if (!FROM_HOOK) saveConfig({ spawn: true });   // launched by hand: spawning with Claude is wanted again
+  writeLauncher();                              // keep autostart pointing at the copy that is running
   createWindow();
   // after the window exists, so the beacon can publish where the pet is
   setInterval(beaconWrite, 2000);
