@@ -176,6 +176,35 @@ def find_owner_pid():
     return None
 
 
+def _cmdline(pid):
+    """The command line of a process, or "" if it cannot be read."""
+    try:
+        if sys.platform == "win32":
+            out = subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 "(Get-CimInstance Win32_Process -Filter 'ProcessId=%d').CommandLine" % pid],
+                capture_output=True, text=True, timeout=6)
+            return out.stdout or ""
+        if os.path.exists("/proc/%d/cmdline" % pid):
+            with open("/proc/%d/cmdline" % pid, "rb") as f:
+                return f.read().replace(b"\0", b" ").decode("utf-8", "replace")
+        out = subprocess.run(["ps", "-o", "args=", "-p", str(pid)],
+                             capture_output=True, text=True, timeout=5)
+        return out.stdout or ""
+    except Exception:
+        return ""
+
+
+def is_headless(pid):
+    """True for a `claude -p` / `--print` run: output goes to a pipe, nobody is
+    watching a window, and a pet for it would appear out of nowhere."""
+    args = _cmdline(pid)
+    if not args:
+        return False
+    import re
+    return bool(re.search(r"(^|\s)(-p|--print|--no-session-persistence)(\s|$|=)", args))
+
+
 def find_host_window_pid():
     """Walk up from this hook to the first ancestor that plausibly owns a
     visible window — the terminal or IDE the session is running in. That is
@@ -230,16 +259,14 @@ def ensure_overlay():
     except Exception:
         pass
     # A one-shot `claude -p` run -- a scheduled job, an orchestrator's
-    # subprocess -- is not a session anyone is sitting in front of. The CLI
-    # records the kind in its registry, keyed by the process that owns it.
+    # subprocess -- is not a session anyone is sitting in front of. The CLI's
+    # registry does not say so (measured: a -p run registers as
+    # kind=interactive, entrypoint=claude-desktop), but the process's own
+    # command line does.
     try:
         owner = find_owner_pid()
-        if owner:
-            reg = os.path.join(os.path.expanduser("~"), ".claude", "sessions", "%d.json" % owner)
-            with open(reg, encoding="utf-8") as f:
-                kind = json.load(f).get("kind")
-            if kind and kind != "interactive":
-                return
+        if owner and is_headless(owner):
+            return
     except Exception:
         pass
     try:
