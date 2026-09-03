@@ -288,6 +288,53 @@ const PRECEDENCE = ['needs_you', 'working', 'done', 'idle', 'asleep'];
 // minutes matters and the difference between thirty and forty does not, and
 // taken across the longest-running session so one slow turn is not hidden by
 // four quick ones.
+// Is the pet standing on a floor, or has it been parked somewhere by hand? A
+// shadow under a pet floating in the middle of the screen would be a lie.
+function onFloor() {
+  if (!win || win.isDestroyed()) return false;
+  const b = win.getBounds();
+  return Math.abs(b.y - floorAt(b.x)) < 24;
+}
+
+// Two moments the pet has had the evidence for all along and never shown.
+//
+// A cut-short turn: overlay/turns.js has always detected an interrupted turn
+// and flattened it into an ordinary finish. The atlas has a 'failed' row --
+// painted in every pet including Codex's -- that has never once played.
+//
+// And coming back: the pet knows how long the machine has been untouched, and
+// it knows when a turn landed. If one landed while you were away and is still
+// unread, that is worth exactly one wave when you sit down. Never otherwise,
+// so the wave means precisely one thing.
+let lastInterruptAt = 0;
+let awaySince = 0;
+let lastWelcomeAt = 0;
+
+function momentFor(wants, nowMs) {
+  for (const s of wants) {
+    const t = s.turn;
+    if (!t || t.inFlight || !t.interrupted) continue;
+    if (t.finishedAt > lastInterruptAt) {
+      lastInterruptAt = t.finishedAt;
+      trace(`moment: a turn was cut short in ${(s.id && s.id.title) || s.session_id.slice(0, 8)}`);
+      return 'Failed';
+    }
+  }
+  const idle = idleMs();
+  if (idle > 120000) { if (!awaySince) awaySince = nowMs - idle; return undefined; }
+  if (awaySince && idle < 5000) {
+    const leftAt = awaySince;
+    awaySince = 0;
+    const landed = wants.some(s => s.turn && !s.turn.inFlight && s.turn.finishedAt > leftAt);
+    if (landed && nowMs - lastWelcomeAt > 600000) {
+      lastWelcomeAt = nowMs;
+      trace('moment: something finished while you were away');
+      return 'Returned';
+    }
+  }
+  return undefined;
+}
+
 const BURN_FULL = 180;            // seconds at which the scale reaches 1
 function burnOf(wants, now) {
   let longest = 0;
@@ -357,6 +404,8 @@ function aggregate() {
     sessions,
     nightGlow: hour >= 22 || hour < 7,
     burn: burnOf(wants, now),
+    grounded: onFloor(),
+    moment: momentFor(wants, Date.now()),
     event: sessionStart ? 'SessionStart' : undefined,
   };
 }
@@ -512,11 +561,12 @@ function turnOf(s) {
   const t = s.turn;                          // from the transcript, may be null
   if (!stop && !prompt) return t;            // no hook ever ran here
   const writtenAt = t ? t.writtenAt || 0 : 0;
+  const interrupted = !!(t && t.interrupted);
   if (prompt > stop) {
     if (t && !t.inFlight && t.finishedAt >= prompt) return t;   // the Stop was lost
-    return { inFlight: true, finishedAt: stop, writtenAt };
+    return { inFlight: true, finishedAt: stop, writtenAt, interrupted };
   }
-  return { inFlight: false, finishedAt: Math.max(stop, t ? t.finishedAt : 0), writtenAt };
+  return { inFlight: false, finishedAt: Math.max(stop, t ? t.finishedAt : 0), writtenAt, interrupted };
 }
 
 // When this session last did anything, as a user would judge it.
@@ -716,7 +766,7 @@ function pushState() {
     // report the pool whenever it changes, so what the tray would list can be
     // checked without having to hover the pet to find out
     const shape = sessionSummaries()
-      .map(x => `${x.title || x.folder || '?'}:${x.mood}${x.pending ? '' : '(read)'}@${Math.round(x.age)}s`).join(' | ');
+      .map(x => `${x.title || x.folder || '?'}:${x.mood}${x.pending ? '' : '(read)'}`).join(' | ');
     if (shape !== lastTracedShape) { lastTracedShape = shape; trace(`pool [${shape}]`); }
   }
 
@@ -782,7 +832,23 @@ function pollLook() {
 // The pet keeps a POST per live session, spaced along the strip it lives on,
 // and patrols between them: one session means it mostly stays put, several
 // means it paces, and a session that needs you pins it to that session's post.
-const WALK_SPEED = 54;           // px/s — a walk, not a slide
+const WALK_SPEED = 54;           // px/s — the pace of a short stroll
+const ACCEL_OVER = 90;           // px spent getting up to speed
+const BRAKE_OVER = 60;           // px spent stopping
+
+// Speed at this point in the current walk: eased in at the start, eased out at
+// the end, cruising in between at a rate set by how far there is to go.
+function gaitSpeed(x) {
+  const cruise = motion.cruise || WALK_SPEED;
+  const span = motion.span || 0;
+  if (!span) return cruise;
+  const gone = Math.abs(x - (motion.startX || x));
+  const left = Math.max(0, span - gone);
+  const up = Math.min(1, gone / Math.min(ACCEL_OVER, span / 2 || 1));
+  const down = Math.min(1, left / Math.min(BRAKE_OVER, span / 2 || 1));
+  const ease = t => t * t * (3 - 2 * t);               // smoothstep
+  return Math.max(18, cruise * (0.35 + 0.65 * ease(Math.min(up, down))));
+}
 const DWELL_MIN = 25000;          // long enough to be a companion, not a fidget
 const DWELL_MAX = 80000;
 
@@ -916,11 +982,19 @@ function tickMotion() {
     }
     motion.targetX = Math.round(t);
     motion.dir = motion.targetX > b.x ? 1 : -1;
+    // A constant 54px/s meant a walk across two monitors was forty unbroken
+    // seconds of something sliding through your peripheral vision. Longer trips
+    // travel faster, and every trip starts and stops rather than snapping into
+    // and out of full speed, so the movement reads as a creature going
+    // somewhere instead of a texture being panned.
+    motion.startX = b.x;
+    motion.span = Math.abs(motion.targetX - b.x);
+    motion.cruise = Math.max(60, Math.min(190, 60 + motion.span * 0.06));
     if (petHit) { petHit = false; clickThrough(true); }
     trace(`walk x=${b.x} -> ${motion.targetX} sessions=${liveSessions} attention=${attentionIndex} mood=${currentMood}`);
   }
 
-  const step = WALK_SPEED * dt * motion.dir;
+  const step = gaitSpeed(b.x) * dt * motion.dir;
   let nx = b.x + step;
   const arrived = (motion.dir > 0 && nx >= motion.targetX) ||
                   (motion.dir < 0 && nx <= motion.targetX);

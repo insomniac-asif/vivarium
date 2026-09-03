@@ -8,13 +8,15 @@
   body.debug { background: #0e0e12; }
   /* the two layers occupy exactly the same box; #fx paints over the sprite
      and is never read by the click hit-test */
-  #stage, #fx { position: absolute; left: 0; top: 0; display: block; }
-  #fx { pointer-events: none; }
+  #shade, #stage, #fx { position: absolute; left: 0; top: 0; display: block; }
+  #shade, #fx { pointer-events: none; }
   #caption { position: fixed; left: 6px; top: 4px; color: #666; font: 11px monospace; display: none; }
   body.debug #caption { display: block; }
 </style>
 </head>
 <body>
+<!-- Ground contact, drawn under the sprite. -->
+<canvas id="shade" width="200" height="224"></canvas>
 <canvas id="stage" width="200" height="224"></canvas>
 <!-- Effects go here, never on #stage. overlay/bridge.js decides what is
      "over the pet" by reading #stage alpha, so a soft glow drawn there
@@ -31,6 +33,10 @@
 // ---------------------------------------------------------------------------
 var CELL_W = 192, CELL_H = 208, COLS = 8;
 var PAD_X = 4, PAD_Y = 4;
+// Where the sprite's feet sit in the cell. The atlas draws the creature
+// standing near the bottom of its cell; this is the line the shadow is cast
+// on and the anchor the breath scales about, so both stay planted.
+var FOOT_Y = PAD_Y + CELL_H - 14;
 
 var BASE_ROWS = {
   'idle':          { row: 0, dur: [280, 110, 110, 140, 140, 320], loop: true },
@@ -90,6 +96,8 @@ var canvas = document.getElementById('stage');
 var ctx = canvas.getContext('2d');
 var fx = document.getElementById('fx');
 var fxc = fx.getContext('2d');
+var shade = document.getElementById('shade');
+var shc = shade.getContext('2d');
 // the sprite, re-tinted; kept between frames so the heat wash costs one blit
 var heat = document.createElement('canvas');
 heat.width = 200; heat.height = 224;
@@ -103,6 +111,7 @@ var state = {
   sessions: 0,
   lookDir: -1,             // 0-15 look index, -1 = neutral deadzone
   burn: 0,                 // 0..1, how long the longest turn has been running
+  grounded: true,          // standing on a floor, rather than parked mid-screen
   ctxPct: null,
   nightGlow: true,
   dragging: false,
@@ -149,12 +158,14 @@ function tick(now) {
   var spec = ROWS[anim.name];
   if (now >= anim.until) {
     if (anim.frame + 1 >= spec.dur.length) {
-      if (spec.loop) {
-        anim.frame = 0;
-        anim.until = now + spec.dur[0] * anim.slow;
-      } else if (anim.oneshot) {
+      if (anim.oneshot) {
+        // one pass and out, whatever the row says: 'failed' and 'review' are
+        // looping rows, and a moment that loops forever is a mood
         anim.oneshot = null;
         startAnim(baseState(), now);
+      } else if (spec.loop) {
+        anim.frame = 0;
+        anim.until = now + spec.dur[0] * anim.slow;
       } else {
         anim.frame = spec.dur.length - 1; // hold last frame
         anim.until = now + 1e9;
@@ -164,7 +175,28 @@ function tick(now) {
       anim.until = now + spec.dur[anim.frame] * anim.slow;
     }
   }
-  draw();
+  // Only repaint when the picture would actually differ. The loop used to draw
+  // on every animation frame -- up to 240 times a second on a fast panel -- to
+  // show about eleven distinct images. The continuous parts are quantised so a
+  // sub-pixel change in the breath does not count as a difference.
+  var key = anim.name + ':' + anim.frame + ':' + state.lookDir + ':' + state.sessions +
+            ':' + state.mood + ':' + (state.dragging ? 1 : 0) + ':' + (state.walking ? 1 : 0) +
+            ':' + Math.round(state.burn * 24) + ':' + (state.grounded ? 1 : 0) +
+            ':' + Math.round(breathPhase(now) * 40) + ':' + Math.round(flickerPhase(now) * 20);
+  if (key !== lastDrawKey) { lastDrawKey = key; draw(); }
+}
+
+var lastDrawKey = '';
+// the two continuous animations, as pure functions of time so the dirty check
+// and the draw agree on exactly the same value
+function breathPhase(now) {
+  if (state.mood === 'asleep') return 0;
+  var hz = 0.25 + state.burn * 1.15;
+  return Math.sin(now / 1000 * hz * Math.PI * 2);
+}
+function flickerPhase(now) {
+  if (state.burn <= 0.01) return 0;
+  return Math.sin(now / 1000 * (2 + 6 * state.burn) * Math.PI * 2);
 }
 
 // coal -> signal red -> white core. The same red the egg burns and the same
@@ -196,16 +228,51 @@ function draw() {
   } else {
     row = ROWS[anim.name].row; col = anim.frame;
   }
+  // Contact shadow. Without it the pet is a sticker floating over the desktop;
+  // with it, it is standing on something. It also carries the one signal that
+  // otherwise disappears: a walking pet is forced into the running row, so its
+  // mood is invisible for the whole traverse -- but the ember bounce in the
+  // shadow keeps burning the entire way.
+  shc.clearRect(0, 0, shade.width, shade.height);
+  if (state.grounded && state.mood !== 'asleep') {
+    // the stride squashes and stretches the contact patch
+    var phase = (anim.name === 'running' || anim.name === 'running-left' ||
+                 anim.name === 'running-right')
+      ? Math.abs(Math.sin(anim.frame / ROWS[anim.name].dur.length * Math.PI))
+      : 0;
+    // Wider than the creature's footprint and sitting just below it: a shadow
+    // that only fills the gap between the feet is invisible, because the body
+    // covers the rest of it.
+    var cx = shade.width / 2;
+    var cy = FOOT_Y + 8;
+    shc.save();
+    shc.globalAlpha = 0.34 - 0.09 * phase;
+    var g = shc.createRadialGradient(cx, cy, 2, cx, cy, 54 + 10 * phase);
+    g.addColorStop(0, 'rgba(0,0,0,1)');
+    g.addColorStop(0.55, 'rgba(0,0,0,0.75)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    shc.fillStyle = g;
+    shc.beginPath();
+    shc.ellipse(cx, cy, 54 + 10 * phase, 7 - 1.5 * phase, 0, 0, Math.PI * 2);
+    shc.fill();
+    if (state.burn > 0.01) {
+      // heat pooling on the ground under a working pet
+      shc.globalCompositeOperation = 'lighter';
+      shc.globalAlpha = (0.05 + 0.11 * state.burn) * (state.nightGlow ? 1 : 0.55);
+      shc.fillStyle = emberColour(state.burn);
+      shc.beginPath();
+      shc.ellipse(cx, cy, 30 + 14 * state.burn, 5, 0, 0, Math.PI * 2);
+      shc.fill();
+    }
+    shc.restore();
+  }
+
   // Breathing: amplitude stays put, only the rate changes, so a working pet
   // reads as working out of the corner of your eye without ever being loud.
   // Anchored at the feet -- the cell has 4px of headroom, so the ceiling is
   // 1.019 and the scale below stays well inside it.
-  var breath = 1;
-  if (state.mood !== 'asleep') {
-    var hz = 0.25 + state.burn * 1.15;                 // slow when new, quick when long
-    breath = 1 + 0.010 * Math.sin(performance.now() / 1000 * hz * Math.PI * 2);
-  }
-  var footY = PAD_Y + CELL_H;
+  var breath = 1 + 0.010 * breathPhase(performance.now());
+  var footY = FOOT_Y;
   ctx.save();
   ctx.translate(0, footY);
   ctx.scale(1, breath);
@@ -221,7 +288,7 @@ function draw() {
   fxc.clearRect(0, 0, fx.width, fx.height);
   if (state.burn > 0.01 && state.mood !== 'asleep') {
     var b = state.burn;
-    var flicker = 0.86 + 0.14 * Math.sin(performance.now() / 1000 * (2 + 6 * b) * Math.PI * 2);
+    var flicker = 0.86 + 0.14 * flickerPhase(performance.now());
     heatc.clearRect(0, 0, heat.width, heat.height);
     heatc.save();
     heatc.translate(0, footY); heatc.scale(1, breath); heatc.translate(0, -footY);
@@ -270,10 +337,13 @@ window.vivarium = {
     // main has been sending these every second since the beginning and the
     // sprite engine dropped them on the floor
     if (typeof s.burn === 'number') state.burn = s.burn;
+    if (typeof s.grounded === 'boolean') state.grounded = s.grounded;
     if (typeof s.ctxPct === 'number' || s.ctxPct === null) state.ctxPct = s.ctxPct;
     if (typeof s.nightGlow === 'boolean') state.nightGlow = s.nightGlow;
     if (s.event === 'SessionStart') playOneshot('jumping');
     if (s.event === 'Petted') playOneshot('waving');
+    if (s.moment === 'Failed') playOneshot('failed');
+    if (s.moment === 'Returned') playOneshot('waving');
     if (s.mood && s.mood !== lastMood) {
       if (s.mood === 'done') playOneshot('waving');
       lastMood = s.mood;

@@ -46,15 +46,19 @@ function scan(text) {
       if (line.indexOf('[Request interrupted by user]') < 0) continue;
       try {
         const o = JSON.parse(line);
-        return { finishedAt: Date.parse(o.timestamp) || 0, inFlight: false };
+        // a turn the user cut short, which is not the same as one that finished
+        return { finishedAt: Date.parse(o.timestamp) || 0, inFlight: false, interrupted: true };
       } catch { continue; }
     }
     let o;
     try { o = JSON.parse(line); } catch { continue; }
     if (o.type !== 'assistant' || !o.message) continue;
+    const reason = o.message.stop_reason;
     return {
       finishedAt: Date.parse(o.timestamp) || 0,
-      inFlight: !DONE.has(o.message.stop_reason),    // null or tool_use: still going
+      inFlight: !DONE.has(reason),                   // null or tool_use: still going
+      // ran out of room or refused: the turn ended, but not well
+      interrupted: reason === 'max_tokens' || reason === 'refusal',
     };
   }
   return null;
