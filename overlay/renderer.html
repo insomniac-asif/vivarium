@@ -6,13 +6,20 @@
 <style>
   html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
   body.debug { background: #0e0e12; }
-  #stage { display: block; }
+  /* the two layers occupy exactly the same box; #fx paints over the sprite
+     and is never read by the click hit-test */
+  #stage, #fx { position: absolute; left: 0; top: 0; display: block; }
+  #fx { pointer-events: none; }
   #caption { position: fixed; left: 6px; top: 4px; color: #666; font: 11px monospace; display: none; }
   body.debug #caption { display: block; }
 </style>
 </head>
 <body>
 <canvas id="stage" width="200" height="224"></canvas>
+<!-- Effects go here, never on #stage. overlay/bridge.js decides what is
+     "over the pet" by reading #stage alpha, so a soft glow drawn there
+     would make the pet swallow clicks across its whole halo. -->
+<canvas id="fx" width="200" height="224"></canvas>
 <div id="caption"></div>
 <script>
 'use strict';
@@ -81,6 +88,12 @@ var MOOD_TO_STATE = {
 
 var canvas = document.getElementById('stage');
 var ctx = canvas.getContext('2d');
+var fx = document.getElementById('fx');
+var fxc = fx.getContext('2d');
+// the sprite, re-tinted; kept between frames so the heat wash costs one blit
+var heat = document.createElement('canvas');
+heat.width = 200; heat.height = 224;
+var heatc = heat.getContext('2d');
 var caption = document.getElementById('caption');
 
 var sheet = null;          // Image once loaded
@@ -89,6 +102,9 @@ var state = {
   mood: 'idle',
   sessions: 0,
   lookDir: -1,             // 0-15 look index, -1 = neutral deadzone
+  burn: 0,                 // 0..1, how long the longest turn has been running
+  ctxPct: null,
+  nightGlow: true,
   dragging: false,
   walking: false,          // autonomous locomotion (session patrol)
   dragDir: 0,              // -1 left, +1 right while dragging or walking
@@ -151,6 +167,23 @@ function tick(now) {
   draw();
 }
 
+// coal -> signal red -> white core. The same red the egg burns and the same
+// red the rest of his work uses; only the temperature moves.
+function emberColour(b) {
+  var stops = [[0.0, 120, 22, 26], [0.55, 255, 43, 51], [1.0, 255, 176, 108]];
+  for (var i = 1; i < stops.length; i++) {
+    if (b <= stops[i][0] || i === stops.length - 1) {
+      var a = stops[i - 1], c = stops[i];
+      var t = (b - a[0]) / (c[0] - a[0] || 1);
+      t = Math.max(0, Math.min(1, t));
+      return 'rgb(' + Math.round(a[1] + (c[1] - a[1]) * t) + ',' +
+                      Math.round(a[2] + (c[2] - a[2]) * t) + ',' +
+                      Math.round(a[3] + (c[3] - a[3]) * t) + ')';
+    }
+  }
+  return '#ff2b33';
+}
+
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (!sheet) return;
@@ -163,8 +196,48 @@ function draw() {
   } else {
     row = ROWS[anim.name].row; col = anim.frame;
   }
+  // Breathing: amplitude stays put, only the rate changes, so a working pet
+  // reads as working out of the corner of your eye without ever being loud.
+  // Anchored at the feet -- the cell has 4px of headroom, so the ceiling is
+  // 1.019 and the scale below stays well inside it.
+  var breath = 1;
+  if (state.mood !== 'asleep') {
+    var hz = 0.25 + state.burn * 1.15;                 // slow when new, quick when long
+    breath = 1 + 0.010 * Math.sin(performance.now() / 1000 * hz * Math.PI * 2);
+  }
+  var footY = PAD_Y + CELL_H;
+  ctx.save();
+  ctx.translate(0, footY);
+  ctx.scale(1, breath);
+  ctx.translate(0, -footY);
   ctx.drawImage(sheet, col * CELL_W, row * CELL_H, CELL_W, CELL_H,
                 PAD_X, PAD_Y, CELL_W, CELL_H);
+  ctx.restore();
+
+  // Heat: the pet's own silhouette, filled with a colour that climbs from a
+  // dim coal to signal red to a white core, laid over itself. Drawn on #fx so
+  // the click mask is untouched, and clipped to the sprite by source-in so it
+  // can never leak past the silhouette.
+  fxc.clearRect(0, 0, fx.width, fx.height);
+  if (state.burn > 0.01 && state.mood !== 'asleep') {
+    var b = state.burn;
+    var flicker = 0.86 + 0.14 * Math.sin(performance.now() / 1000 * (2 + 6 * b) * Math.PI * 2);
+    heatc.clearRect(0, 0, heat.width, heat.height);
+    heatc.save();
+    heatc.translate(0, footY); heatc.scale(1, breath); heatc.translate(0, -footY);
+    heatc.drawImage(sheet, col * CELL_W, row * CELL_H, CELL_W, CELL_H,
+                    PAD_X, PAD_Y, CELL_W, CELL_H);
+    heatc.restore();
+    heatc.globalCompositeOperation = 'source-in';
+    heatc.fillStyle = emberColour(b);
+    heatc.fillRect(0, 0, heat.width, heat.height);
+    heatc.globalCompositeOperation = 'source-over';
+    fxc.globalCompositeOperation = 'lighter';
+    fxc.globalAlpha = (0.05 + 0.14 * b) * flicker * (state.nightGlow ? 1 : 0.55);
+    fxc.drawImage(heat, 0, 0);
+    fxc.globalAlpha = 1;
+    fxc.globalCompositeOperation = 'source-over';
+  }
   // session dots (2+ live sessions), dim red, bottom-center
   if (state.sessions >= 2) {
     var n = Math.min(state.sessions, 5);
@@ -194,6 +267,11 @@ window.vivarium = {
     if (typeof s.dragging === 'boolean') state.dragging = s.dragging;
     if (typeof s.walking === 'boolean') state.walking = s.walking;
     if (typeof s.dragDir === 'number' && s.dragDir !== 0) state.dragDir = s.dragDir;
+    // main has been sending these every second since the beginning and the
+    // sprite engine dropped them on the floor
+    if (typeof s.burn === 'number') state.burn = s.burn;
+    if (typeof s.ctxPct === 'number' || s.ctxPct === null) state.ctxPct = s.ctxPct;
+    if (typeof s.nightGlow === 'boolean') state.nightGlow = s.nightGlow;
     if (s.event === 'SessionStart') playOneshot('jumping');
     if (s.event === 'Petted') playOneshot('waving');
     if (s.mood && s.mood !== lastMood) {

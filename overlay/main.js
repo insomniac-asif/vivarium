@@ -279,6 +279,27 @@ function sessionMood(s, now) {
 
 const PRECEDENCE = ['needs_you', 'working', 'done', 'idle', 'asleep'];
 
+// How long the machine has been thinking, as 0..1.
+//
+// The pet knows the moment a turn began and has never once shown it: a turn
+// five seconds old and one forty minutes old look identical. That magnitude is
+// the thing the user is actually waiting on, and nothing else on the desk
+// reports it. Log-scaled, because the difference between ten seconds and two
+// minutes matters and the difference between thirty and forty does not, and
+// taken across the longest-running session so one slow turn is not hidden by
+// four quick ones.
+const BURN_FULL = 180;            // seconds at which the scale reaches 1
+function burnOf(wants, now) {
+  let longest = 0;
+  for (const s of wants) {
+    if (!s.turn || !s.turn.inFlight) continue;
+    const began = Math.max(s.prompt_ts || 0, s.start_ts || 0);
+    if (began) longest = Math.max(longest, now - began);
+  }
+  if (!longest) return 0;
+  return Math.min(1, Math.log1p(longest / 20) / Math.log1p(BURN_FULL / 20));
+}
+
 function aggregate() {
   const now = Date.now() / 1000;
   const states = readSessionStates();
@@ -306,6 +327,7 @@ function aggregate() {
   // something stable — sorting by recency would reshuffle the posts every time
   // a session took a turn and leave the pet skating between them.
   const posts = wants.slice().sort((a, b) =>
+    (a.started_at || 0) - (b.started_at || 0) ||
     String(a.session_id || '').localeCompare(String(b.session_id || '')));
   liveSessions = posts.length;
   attentionIndex = posts.findIndex(s => sessionMood(s, now) === 'needs_you');
@@ -334,6 +356,7 @@ function aggregate() {
     drowsy: hour >= 7 && hour < 15,
     sessions,
     nightGlow: hour >= 22 || hour < 7,
+    burn: burnOf(wants, now),
     event: sessionStart ? 'SessionStart' : undefined,
   };
 }
@@ -809,16 +832,48 @@ function floorAt(x) {
   return d.y + d.height - WIN_H - 8;
 }
 
+// Posts belong to screens, not to a number line. Spacing them evenly along the
+// whole desk puts one straight onto a bezel: on a two-monitor desk, three or
+// five sessions each put a post at x=-100, which is a 200px pet sawn in half by
+// the seam. Each display takes a share of the posts proportional to its width
+// and spaces them inside its own work area, clear of the edges.
+let postCache = { key: '', posts: [] };
+
+function postLayout(n) {
+  const all = strips();
+  const key = n + '|' + all.map(d => d.x + ',' + d.width).join(';');
+  if (postCache.key === key) return postCache.posts;      // never recomputed mid-walk
+  const total = all.reduce((sum, d) => sum + d.width, 0) || 1;
+  const share = all.map(d => (n * d.width) / total);
+  const count = share.map(Math.floor);
+  let short = n - count.reduce((a, b) => a + b, 0);
+  // largest remainder, so the per-display counts add back up to exactly n
+  share.map((v, i) => [v - count[i], i])
+       .sort((a, b) => b[0] - a[0])
+       .forEach(([, i]) => { if (short > 0) { count[i]++; short--; } });
+  const MARGIN = 16;
+  const posts = [];
+  all.forEach((d, i) => {
+    const k = count[i];
+    const room = Math.max(0, d.width - WIN_W - 2 * MARGIN);
+    for (let j = 0; j < k; j++) {
+      posts.push(Math.round(d.x + MARGIN + room * ((j + 1) / (k + 1))));
+    }
+  });
+  postCache = { key, posts };
+  return posts;
+}
+
 function postX(i, n) {
-  const { x0, x1 } = desktopSpan();
-  const span = x1 - x0;
   if (n <= 1) {
     // one session: it keeps to its corner of the screen it is already on,
     // rather than marching across the desk for no reason
     const wa = strip();
     return wa.x + (wa.width - WIN_W) * 0.82;
   }
-  return x0 + span * ((i + 1) / (n + 1));               // one post per session
+  const posts = postLayout(n);
+  if (!posts.length) return strip().x;
+  return posts[Math.max(0, Math.min(posts.length - 1, i))];
 }
 
 function chooseTarget() {
