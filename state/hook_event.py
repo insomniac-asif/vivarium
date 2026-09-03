@@ -189,6 +189,20 @@ def find_owner_pid():
     return None
 
 
+def pid_alive(pid):
+    """Is this process still around?
+
+    Not os.kill(pid, 0): on Windows that raises the same OSError (winerror 87)
+    for a process that is running as for one that never existed, so it cannot
+    tell them apart -- measured. The process table can, it is already built for
+    the ancestry walk, and it costs about 20ms for five hundred processes.
+    """
+    table = _proc_parents()
+    if not table:
+        return True                     # cannot tell: do not act on a guess
+    return pid in table
+
+
 def _cmdline(pid):
     """The command line of a process, or "" if it cannot be read."""
     try:
@@ -281,13 +295,9 @@ def ensure_overlay():
                 with open(BEACON, encoding="utf-8") as f:
                     pid = int(json.load(f).get("pid") or 0)
                 if pid > 0:
-                    os.kill(pid, 0)
-            except (ProcessLookupError, PermissionError):
-                alive = os.name == "nt" and False
-            except OSError as e:
-                alive = getattr(e, "winerror", None) != 87 and e.errno not in (3,)
+                    alive = pid_alive(pid)
             except Exception:
-                alive = True
+                pass                    # cannot tell: assume it is up
             if alive:
                 return          # already up and heartbeating
     except OSError:
