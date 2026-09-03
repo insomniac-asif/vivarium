@@ -258,17 +258,6 @@ def ensure_overlay():
                 return
     except Exception:
         pass
-    # A one-shot `claude -p` run -- a scheduled job, an orchestrator's
-    # subprocess -- is not a session anyone is sitting in front of. The CLI's
-    # registry does not say so (measured: a -p run registers as
-    # kind=interactive, entrypoint=claude-desktop), but the process's own
-    # command line does.
-    try:
-        owner = find_owner_pid()
-        if owner and is_headless(owner):
-            return
-    except Exception:
-        pass
     try:
         if time.time() - os.path.getmtime(BEACON) < 90:
             # fresh beacon, but is the process behind it alive? A crashed or
@@ -291,6 +280,21 @@ def ensure_overlay():
     except OSError:
         pass                # missing beacon -> not running
 
+    # Only now, with a spawn actually on the table, is it worth asking the
+    # expensive question. A one-shot `claude -p` run -- a scheduled job, an
+    # orchestrator's subprocess -- is not a session anyone is sitting in front
+    # of. The CLI's registry does not say so (measured: a -p run registers as
+    # kind=interactive, entrypoint=claude-desktop), but the process's own
+    # command line does, and reading it costs a process and about a second --
+    # which is why this sits after the beacon check rather than before it. A
+    # scheduled job every two minutes would otherwise pay that 720 times a day
+    # to be told a pet was already running.
+    try:
+        owner = find_owner_pid()
+        if owner and is_headless(owner):
+            return
+    except Exception:
+        pass
     repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     overlay = os.path.join(repo, "overlay")
     is_win = sys.platform == "win32"
