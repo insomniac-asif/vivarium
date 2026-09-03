@@ -74,9 +74,21 @@ def record(data):
     os.replace(tmp, path)
 
 
+_PROC_CACHE = None
+
+
 def _proc_parents():
     """pid -> (ppid, name) for every process. Windows via toolhelp, POSIX via
-    /proc. Returns {} if unavailable — callers must tolerate that."""
+    /proc. Returns {} if unavailable — callers must tolerate that.
+
+    Snapshotting several hundred processes is the most expensive thing this
+    script does, and one hook asks for it twice (the owning process and the
+    window to raise). The answer cannot meaningfully change inside a single
+    run, so take it once.
+    """
+    global _PROC_CACHE
+    if _PROC_CACHE is not None:
+        return _PROC_CACHE
     out = {}
     if sys.platform == "win32":
         try:
@@ -142,6 +154,7 @@ def _proc_parents():
                         continue
             except Exception:
                 pass
+    _PROC_CACHE = out
     return out
 
 
