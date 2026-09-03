@@ -51,11 +51,31 @@ let hoverSince = 0;      // when the current hover began, for the open delay
 
 if (!app.requestSingleInstanceLock()) app.exit(0);
 
+// Electron's lock is keyed to this installation, but the pet's beacon, config
+// and session state are one set of files shared by every copy. A second copy
+// run from another path -- a dev checkout beside an installed plugin, a
+// scratch build -- therefore gets its own lock and its own window, and the two
+// then fight over the same config: they overwrite each other's position, and
+// quitting one writes "do not spawn" for both. The beacon is the thing they
+// share, so it is what says whether a pet is already out there.
+function anotherPetIsRunning() {
+  let beacon;
+  try { beacon = JSON.parse(fs.readFileSync(PIDFILE, 'utf8')); } catch { return false; }
+  const pid = Number(beacon && beacon.pid);
+  if (!pid || pid === process.pid) return false;
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+}
+
 // A capture request with no pet running is an error, not a launch: nobody
 // asked for a pet, and the caller is waiting for a file that would never come.
 if (captureTarget(process.argv)) {
   process.stderr.write('vivarium: no pet is running to capture\n');
   app.exit(2);
+}
+
+if (anotherPetIsRunning()) {
+  process.stderr.write('vivarium: a pet is already running\n');
+  app.exit(0);
 }
 
 // `electron . --capture out.png` asks the pet already running to photograph
