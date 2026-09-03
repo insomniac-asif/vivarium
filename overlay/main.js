@@ -988,10 +988,18 @@ function autostartEnabled() { return fs.existsSync(STARTUP_VBS); }
 // starts, so the first session after an update heals it; and the script checks
 // the path still exists, so a copy that was pruned before that happened does
 // nothing instead of complaining.
+// Electron's own executable, not the npm shim. The shim is a batch file that
+// runs node that runs Electron, which leaves a cmd and a node process parented
+// over the pet -- and a console window with them. process.execPath is exactly
+// the binary this process is running under, so it is right by construction.
+function electronBinary() {
+  return process.execPath;
+}
+
 function writeLauncher() {
   if (process.platform !== 'win32' || !autostartEnabled()) return;
   try {
-    const electronCmd = path.join(__dirname, 'node_modules', '.bin', 'electron.cmd');
+    const electronCmd = electronBinary();
     if (!fs.existsSync(electronCmd)) return;      // nothing worth pointing at yet
     const body = autostartScript(electronCmd);
     let current = '';
@@ -1014,8 +1022,7 @@ function autostartScript(electronCmd) {
 function setAutostart(on) {
   try {
     if (on) {
-      fs.writeFileSync(STARTUP_VBS,
-        autostartScript(path.join(__dirname, 'node_modules', '.bin', 'electron.cmd')));
+      fs.writeFileSync(STARTUP_VBS, autostartScript(electronBinary()));
     } else if (fs.existsSync(STARTUP_VBS)) fs.unlinkSync(STARTUP_VBS);
   } catch {}
 }

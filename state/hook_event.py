@@ -222,14 +222,32 @@ def _cmdline(pid):
         return ""
 
 
+HEADLESS_FLAGS = ("-p", "--print", "--no-session-persistence")
+
+
 def is_headless(pid):
     """True for a `claude -p` / `--print` run: output goes to a pipe, nobody is
-    watching a window, and a pet for it would appear out of nowhere."""
+    watching a window, and a pet for it would appear out of nowhere.
+
+    Match argument tokens rather than searching the raw string: an install path
+    with a space in it can contain something that reads exactly like the flag,
+    and a user whose path happened to look that way would never get a pet at
+    all. shlex keeps a quoted path in one piece; the first token is the
+    executable and is skipped either way.
+    """
     args = _cmdline(pid)
     if not args:
         return False
-    import re
-    return bool(re.search(r"(^|\s)(-p|--print|--no-session-persistence)(\s|$|=)", args))
+    try:
+        import shlex
+        tokens = shlex.split(args, posix=False)[1:]
+    except Exception:
+        tokens = args.split()[1:]
+    for t in tokens:
+        t = t.strip('"')
+        if t in HEADLESS_FLAGS or t.split("=", 1)[0] in HEADLESS_FLAGS:
+            return True
+    return False
 
 
 def find_host_window_pid():
@@ -267,6 +285,37 @@ def find_host_window_pid():
     while candidates and candidates[-1] <= 1:
         candidates.pop()
     return candidates[-1] if candidates else None
+
+
+def electron_binary(overlay):
+    """The Electron executable itself, not the npm shim.
+
+    The shim in node_modules/.bin is a batch file on Windows that runs node,
+    which runs Electron -- so launching it leaves a cmd and a node process
+    parented over the pet for its whole life, and because the hook spawns
+    detached, that console app allocates a console window of its own. A visible
+    "node" terminal, for a pet that is supposed to be an invisible overlay.
+    Electron's own binary is a GUI executable with no console at all.
+
+    The package records where it put the binary in path.txt; the platform
+    defaults are the fallback.
+    """
+    pkg = os.path.join(overlay, "node_modules", "electron")
+    try:
+        with open(os.path.join(pkg, "path.txt"), encoding="utf-8") as f:
+            rel = f.read().strip()
+        if rel:
+            exe = os.path.join(pkg, "dist", rel)
+            if os.path.exists(exe):
+                return exe
+    except Exception:
+        pass
+    for rel in ("electron.exe", "electron",
+                os.path.join("Electron.app", "Contents", "MacOS", "Electron")):
+        exe = os.path.join(pkg, "dist", rel)
+        if os.path.exists(exe):
+            return exe
+    return None
 
 
 def ensure_overlay():
@@ -321,9 +370,8 @@ def ensure_overlay():
     repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     overlay = os.path.join(repo, "overlay")
     is_win = sys.platform == "win32"
-    exe = os.path.join(overlay, "node_modules", ".bin",
-                       "electron.cmd" if is_win else "electron")
-    if not os.path.exists(exe):
+    exe = electron_binary(overlay)
+    if not exe:
         return              # deps not installed yet; /vivarium:setup handles it
 
     kwargs = {"cwd": overlay, "stdout": subprocess.DEVNULL,

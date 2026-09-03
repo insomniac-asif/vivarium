@@ -33,7 +33,13 @@ Set up Vivarium for this user. Work through these steps, reporting progress:
 
 5. **Hooks.** The plugin's `hooks/hooks.json` registers Notification / Stop / UserPromptSubmit / SessionStart / SessionEnd event writers automatically when the plugin is enabled (each tries `python3` and falls back to `python`, so it works wherever step 2 found an interpreter) — verify with the user that the plugin is enabled and do not duplicate these into settings.
 
-6. **Launch the overlay.** Run `<plugin-root>/overlay/node_modules/.bin/electron <plugin-root>/overlay` (use `electron.cmd` on Windows) detached/in background. The pet appears bottom-right; right-click it for the pet picker (any Codex-format v2 pet in `~/.claude/pets/` or `~/.codex/pets/` is listed automatically), position reset, autostart toggle, and quit.
+6. **Launch the overlay.** Run the Electron *binary* directly:
+   `<plugin-root>/overlay/node_modules/electron/dist/electron.exe <plugin-root>/overlay`
+   (on macOS `.../dist/Electron.app/Contents/MacOS/Electron`, on Linux
+   `.../dist/electron`), detached/in background. Do **not** use the
+   `node_modules/.bin/electron` shim: on Windows it is a batch file that runs
+   node that runs Electron, so it leaves a cmd and a node process parented over
+   the pet — and a visible console window with them. The pet appears bottom-right; right-click it for the pet picker (any Codex-format v2 pet in `~/.claude/pets/` or `~/.codex/pets/` is listed automatically), position reset, autostart toggle, and quit.
 
 7. **Autostart** (optional, ask first): on Windows the right-click menu's "Start with Windows" writes a Startup-folder script; on macOS/Linux tell the user to add the electron command to their login items / autostart mechanism manually.
 
