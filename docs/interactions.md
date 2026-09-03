@@ -60,6 +60,21 @@ What the ecosystem does, and what Vivarium implements.
   that way would claim to be working forever — so when the stamps say a turn is
   in flight, the tail of the transcript is read to see whether the last
   assistant record actually finished.
+- **It keeps off the screen you are working on**: the pet learns which display
+  is yours from where your pointer actually spends its time, and while nothing
+  needs you it takes posts on the other screens, so its presence never competes
+  with your work. The moment a session does need you, territory yields: it
+  crosses the bezel, walks to that session's post and stands there, and the
+  crossing itself is the news. Time only counts while someone is at the
+  machine, so a pointer left parked overnight claims nothing, and with one
+  display, or before any screen is clearly yours, it behaves exactly as before.
+- **It burns while it thinks**: heat rises inside the creature's own silhouette
+  over the life of the longest running turn, and its breath quickens with it.
+  A turn five seconds old and one forty minutes old used to look identical;
+  now the difference is readable across the room. Banked in daylight.
+- **It stands on the ground**: a contact shadow that stretches with its stride,
+  with heat pooling in it while a turn runs. That shadow is the only thing that
+  can express mood during a walk, because walking takes over the animation.
 - **It roams the whole desk**: with several sessions open the pet keeps one
   post per session spread across every display, so where it is standing tells
   you which screen the work is on, and it crosses between them rather than

@@ -792,13 +792,15 @@ function pushState() {
 // ---- look direction (cursor following, idle only) -------------------------
 function pollLook() {
   if (!win || win.isDestroyed() || dragging) return;
+  const cursor = screen.getCursorScreenPoint();
+  noteCursor(cursor);
   // The pet page only learns about the pointer through move events it is
   // forwarded, and a pointer that jumps from the pet onto the card (a window
   // of its own) or straight off the edge never sends one. So the truth about
   // "is the pointer over us" comes from asking the OS, which we already do
   // here 5 times a second for the gaze.
   if (petOver || panelOver) {
-    const c = screen.getCursorScreenPoint();
+    const c = cursor;
     const inside = (b) => c.x >= b.x && c.x < b.x + b.width && c.y >= b.y && c.y < b.y + b.height;
     const overPet = inside(win.getBounds());
     const overPanel = !!(panel && !panel.isDestroyed() && panel.isVisible() && inside(panel.getBounds()));
@@ -811,7 +813,7 @@ function pollLook() {
   }
   let dir = -1;
   if (currentMood === 'idle') {
-    const c = screen.getCursorScreenPoint();
+    const c = cursor;
     const b = win.getBounds();
     const dx = c.x - (b.x + b.width / 2);
     const dy = c.y - (b.y + b.height / 2);
@@ -930,6 +932,61 @@ function postLayout(n) {
   return posts;
 }
 
+// ---- territory ------------------------------------------------------------
+//
+// Which screen you are working on, learned from where your pointer actually
+// spends its time. The pet uses it to stay out of the way: while nothing needs
+// you, it takes posts on the screens you are NOT using, so its presence is
+// never competing with your work. The moment a session does need you, territory
+// yields -- it crosses the bezel, walks to that session's post and stands
+// there, and the crossing itself is the news.
+//
+// Time only counts while someone is at the machine, so leaving the pointer
+// parked on one monitor overnight does not make that monitor yours.
+const occupancy = new Map();      // display id -> decayed dwell
+let yourDisplay = null;
+let claimant = null, claimantSince = 0;
+const CLAIM_SHARE = 0.65, CLAIM_HOLD = 20000, RELEASE_SHARE = 0.5;
+
+function noteCursor(point) {
+  if (idleMs() > 5000) return;                        // nobody is here to have a screen
+  let here;
+  try { here = screen.getDisplayNearestPoint(point).id; } catch { return; }
+  let total = 0;
+  for (const [id, v] of occupancy) { const nv = v * 0.995; occupancy.set(id, nv); total += nv; }
+  const mine = (occupancy.get(here) || 0) + 1;
+  occupancy.set(here, mine);
+  total += 1;
+
+  let leader = null, best = 0;
+  for (const [id, v] of occupancy) if (v > best) { best = v; leader = id; }
+  const share = total ? best / total : 0;
+  const now = Date.now();
+  if (share > CLAIM_SHARE) {
+    if (claimant !== leader) { claimant = leader; claimantSince = now; }
+    else if (now - claimantSince > CLAIM_HOLD && yourDisplay !== leader) {
+      yourDisplay = leader;
+      trace(`territory: you are working on display ${leader} (${Math.round(share * 100)}%)`);
+    }
+  } else {
+    claimant = null;
+    if (yourDisplay !== null && share < RELEASE_SHARE) {
+      trace('territory: no screen is clearly yours any more');
+      yourDisplay = null;
+    }
+  }
+}
+
+// The display a post sits on.
+function displayOfX(x) {
+  const cx = x + WIN_W / 2;
+  for (const d of screen.getAllDisplays()) {
+    const w = d.workArea;
+    if (cx >= w.x && cx < w.x + w.width) return d.id;
+  }
+  return null;
+}
+
 function postX(i, n) {
   if (n <= 1) {
     // one session: it keeps to its corner of the screen it is already on,
@@ -951,7 +1008,12 @@ function chooseTarget() {
     return Math.max(wa.x, Math.min(wa.x + wa.width - WIN_W,
                                    base + (Math.random() - 0.5) * 140));
   }
-  return postX(Math.floor(Math.random() * n), n);            // pace the posts
+  // Nothing needs you, so position carries no message -- spend that freedom on
+  // staying off your screen rather than on a coin flip.
+  const posts = postLayout(n);
+  const away = posts.filter(x => displayOfX(x) !== yourDisplay);
+  const from = (yourDisplay !== null && away.length) ? away : posts;
+  return from[Math.floor(Math.random() * from.length)];
 }
 
 function setWalking(on, dir) {
