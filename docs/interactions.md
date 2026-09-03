@@ -60,6 +60,14 @@ What the ecosystem does, and what Vivarium implements.
   that way would claim to be working forever — so when the stamps say a turn is
   in flight, the tail of the transcript is read to see whether the last
   assistant record actually finished.
+- **It roams the whole desk**: with several sessions open the pet keeps one
+  post per session spread across every display, so where it is standing tells
+  you which screen the work is on, and it crosses between them rather than
+  being penned into the one it started on. Screens of different heights are
+  handled: the floor belongs to the screen the pet is over, so it steps up or
+  down at a seam -- unless you have parked it somewhere by hand, in which case
+  it stays where you put it. With a single session it keeps to its corner of
+  the screen it is already on rather than marching across the desk for nothing.
 - **Liveness is the process, not a timer**: each session records the pid of the
   process running it, so one whose window was closed or killed disappears at
   once instead of lingering for the timeout — a window that dies has no chance

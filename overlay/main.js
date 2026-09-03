@@ -779,16 +779,46 @@ function trace(msg) {
   } catch {}
 }
 
+// The display the pet is standing on.
 function strip() {
   const b = win.getBounds();
   return screen.getDisplayNearestPoint({ x: b.x + b.width / 2, y: b.y + b.height / 2 }).workArea;
 }
 
+// Every display, left to right. The pet walks the whole desk, not the screen it
+// happened to start on: with several sessions its posts are spread across all
+// of them, so where it is standing tells you which screen the work is on.
+function strips() {
+  return screen.getAllDisplays().map(d => d.workArea).sort((a, b) => a.x - b.x);
+}
+
+// The full run of desk the pet may occupy, as positions for its left edge.
+function desktopSpan() {
+  const all = strips();
+  const first = all[0], last = all[all.length - 1];
+  return { x0: first.x, x1: last.x + last.width - WIN_W };
+}
+
+// Where the ground is under a given position. Displays can be different heights
+// and can sit at different offsets, so the floor is a property of the screen the
+// pet is over, not a constant.
+function floorAt(x) {
+  const cx = x + WIN_W / 2;
+  const all = strips();
+  const d = all.find(w => cx >= w.x && cx < w.x + w.width) || strip();
+  return d.y + d.height - WIN_H - 8;
+}
+
 function postX(i, n) {
-  const wa = strip();
-  const span = wa.width - WIN_W;
-  if (n <= 1) return wa.x + span * 0.82;                 // its usual corner
-  return wa.x + span * ((i + 1) / (n + 1));              // evenly spaced posts
+  const { x0, x1 } = desktopSpan();
+  const span = x1 - x0;
+  if (n <= 1) {
+    // one session: it keeps to its corner of the screen it is already on,
+    // rather than marching across the desk for no reason
+    const wa = strip();
+    return wa.x + (wa.width - WIN_W) * 0.82;
+  }
+  return x0 + span * ((i + 1) / (n + 1));               // one post per session
 }
 
 function chooseTarget() {
@@ -848,9 +878,21 @@ function tickMotion() {
   } else {
     setWalking(true, motion.dir);
   }
-  const wa = strip();
-  nx = Math.max(wa.x, Math.min(wa.x + wa.width - WIN_W, Math.round(nx)));
-  win.setPosition(nx, b.y);
+  // Clamp to the whole desk rather than the current screen -- clamping per
+  // display is what pinned the pet to whichever one it booted on, because the
+  // edge of that screen was a wall.
+  const { x0, x1 } = desktopSpan();
+  nx = Math.max(x0, Math.min(x1, Math.round(nx)));
+  // Step up or down at a seam between screens of different heights, but only if
+  // the pet is walking on the ground: if it has been parked somewhere by hand,
+  // leave it where it was put.
+  let ny = b.y;
+  const wasFloor = floorAt(b.x);
+  if (Math.abs(b.y - wasFloor) < 24) {
+    const nowFloor = floorAt(nx);
+    if (nowFloor !== wasFloor) ny = nowFloor;
+  }
+  win.setPosition(nx, ny);
 }
 
 // ---- window ---------------------------------------------------------------
