@@ -455,8 +455,8 @@ function livePool(states, now) {
       // The pet is the opposite: its mood, its dots and the posts it patrols
       // speak only for what is still pending.
       .map(s => { s.pending = pending(s, now); return s; })
-      .sort((a, b) => (lastSeen(b) || (b.started_at || 0) / 1000)
-                    - (lastSeen(a) || (a.started_at || 0) / 1000));
+      .sort((a, b) => (activityAt(b) || (b.started_at || 0))
+                    - (activityAt(a) || (a.started_at || 0)));
   }
 
   // Fallback for anywhere the registry is not written: back to timestamps.
@@ -494,6 +494,24 @@ function turnOf(s) {
     return { inFlight: true, finishedAt: stop, writtenAt };
   }
   return { inFlight: false, finishedAt: Math.max(stop, t ? t.finishedAt : 0), writtenAt };
+}
+
+// When this session last did anything, as a user would judge it.
+//
+// The hooks only fire at the edges of a turn -- one when the prompt goes in,
+// one when the turn ends -- so a session in the middle of a long run has not
+// stamped anything for as long as that run has been going. Reading the hooks
+// alone, a session five hours into an agent run reports "5h ago" while it is
+// working flat out. While a turn is in flight the transcript is the thing that
+// is actually moving, so it answers instead; once the turn is over the
+// transcript keeps being appended for bookkeeping long after the conversation
+// stopped, so then it does not.
+function activityAt(s) {
+  const stamps = lastSeen(s) * 1000;
+  const t = s.turn;
+  if (!t) return stamps;
+  if (t.inFlight) return Math.max(stamps, t.writtenAt || 0);
+  return Math.max(stamps, t.finishedAt || 0);
 }
 
 // Everything a decision needs, read once: what the app calls this session, and
@@ -551,7 +569,7 @@ function sessionSummaries() {
         folder: projectName(s.cwd),
         branch: s.cwd ? gitBranch(s.cwd) : null,
         mood: sessionMood(s, now),
-        age: now - (lastSeen(s) || (s.started_at || 0) / 1000 || now),
+        age: now - ((activityAt(s) / 1000) || (s.started_at || 0) / 1000 || now),
         ctx: typeof s.ctx === 'number' ? s.ctx : null,
         model: (s.model || (id && id.model)) ? String(s.model || id.model).toLowerCase() : null,
         cost: typeof s.cost === 'number' ? s.cost : null,
@@ -675,7 +693,7 @@ function pushState() {
     // report the pool whenever it changes, so what the tray would list can be
     // checked without having to hover the pet to find out
     const shape = sessionSummaries()
-      .map(x => `${x.title || x.folder || '?'}:${x.mood}${x.pending ? '' : '(read)'}`).join(' | ');
+      .map(x => `${x.title || x.folder || '?'}:${x.mood}${x.pending ? '' : '(read)'}@${Math.round(x.age)}s`).join(' | ');
     if (shape !== lastTracedShape) { lastTracedShape = shape; trace(`pool [${shape}]`); }
   }
 
