@@ -177,7 +177,8 @@ def write_heartbeat(sid, now, pct, model, cwd, cost, lv):
             "cost": cost,
             "level": lv,
         })
-        tmp = path + ".tmp"
+        # unique per process; the hook writer targets this same file
+        tmp = "%s.%d.tmp" % (path, os.getpid())
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(hb, f)
         os.replace(tmp, path)

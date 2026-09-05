@@ -123,7 +123,12 @@ function saveConfig(patch) {
   try {
     const cfg = Object.assign(loadConfig(), patch);
     fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+    // Write and rename, so a reader never sees a half-written file. A truncated
+    // config reads as no config at all, which silently loses the pet's
+    // position, its chosen pet, and whether the user asked it not to spawn.
+    const tmp = CONFIG_PATH + '.' + process.pid + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2));
+    fs.renameSync(tmp, CONFIG_PATH);
   } catch {}
 }
 function defaultPosition() {
@@ -306,7 +311,11 @@ function onFloor() {
 // it knows when a turn landed. If one landed while you were away and is still
 // unread, that is worth exactly one wave when you sit down. Never otherwise,
 // so the wave means precisely one thing.
-let lastInterruptAt = 0;
+// Per session, and floored at the moment the pet started: one shared watermark
+// let a newer interrupt in one session hide an older one in another, and a
+// watermark of zero meant every launch replayed the most recent interrupt in
+// the history as though it had just happened.
+const seenInterrupt = new Map();
 let awaySince = 0;
 let lastWelcomeAt = 0;
 
@@ -314,8 +323,10 @@ function momentFor(wants, nowMs) {
   for (const s of wants) {
     const t = s.turn;
     if (!t || t.inFlight || !t.interrupted) continue;
-    if (t.finishedAt > lastInterruptAt) {
-      lastInterruptAt = t.finishedAt;
+    if (t.finishedAt < bootedAt) continue;              // it happened before we existed
+    const seen = seenInterrupt.get(s.session_id) || 0;
+    if (t.finishedAt > seen) {
+      seenInterrupt.set(s.session_id, t.finishedAt);
       trace(`moment: a turn was cut short in ${(s.id && s.id.title) || s.session_id.slice(0, 8)}`);
       return 'Failed';
     }
@@ -340,7 +351,10 @@ function burnOf(wants, now) {
   let longest = 0;
   for (const s of wants) {
     if (!s.turn || !s.turn.inFlight) continue;
-    const began = Math.max(s.prompt_ts || 0, s.start_ts || 0);
+    // The clock starts when a prompt was submitted, never when the session was
+    // opened: a session sitting untouched since this morning is not a turn that
+    // has been running since this morning, and it was burning at full heat.
+    const began = s.prompt_ts || 0;
     if (began) longest = Math.max(longest, now - began);
   }
   if (!longest) return 0;
@@ -886,8 +900,17 @@ function strips() {
 // The full run of desk the pet may occupy, as positions for its left edge.
 function desktopSpan() {
   const all = strips();
-  const first = all[0], last = all[all.length - 1];
-  return { x0: first.x, x1: last.x + last.width - WIN_W };
+  // sorting by x puts the leftmost display first, but the display that starts
+  // furthest right is not necessarily the one that ENDS furthest right -- a
+  // wide screen beside a narrow one, or any overlapping arrangement, would have
+  // walled the pet out of part of the desk
+  let x0 = Infinity, x1 = -Infinity;
+  for (const d of all) {
+    if (d.x < x0) x0 = d.x;
+    if (d.x + d.width > x1) x1 = d.x + d.width;
+  }
+  if (!isFinite(x0)) { const wa = strip(); return { x0: wa.x, x1: wa.x + wa.width - WIN_W }; }
+  return { x0, x1: x1 - WIN_W };
 }
 
 // Where the ground is under a given position. Displays can be different heights
@@ -946,10 +969,18 @@ function postLayout(n) {
 const occupancy = new Map();      // display id -> decayed dwell
 let yourDisplay = null;
 let claimant = null, claimantSince = 0;
-const CLAIM_SHARE = 0.65, CLAIM_HOLD = 20000, RELEASE_SHARE = 0.5;
+const CLAIM_SHARE = 0.65, CLAIM_HOLD = 20000, RELEASE_SHARE = 0.45;
+
+let lastPoint = null;
 
 function noteCursor(point) {
   if (idleMs() > 5000) return;                        // nobody is here to have a screen
+  // A pointer that has not moved is not evidence of anything. Without this, a
+  // mouse parked on one screen votes five times a second while the user types
+  // on the other one, and the pet decides the empty screen is theirs.
+  const moved = !lastPoint || lastPoint.x !== point.x || lastPoint.y !== point.y;
+  lastPoint = { x: point.x, y: point.y };
+  if (!moved) return;
   let here;
   try { here = screen.getDisplayNearestPoint(point).id; } catch { return; }
   let total = 0;
@@ -970,8 +1001,14 @@ function noteCursor(point) {
     }
   } else {
     claimant = null;
-    if (yourDisplay !== null && share < RELEASE_SHARE) {
-      trace('territory: no screen is clearly yours any more');
+    // Release on YOUR screen's own share, not the leader's. On a two-display
+    // desk the leader always holds at least half by definition, so a rule
+    // written against the leader could never fire and a stale claim was
+    // permanent -- someone splitting their time evenly kept a screen assigned
+    // to them forever.
+    const yours = yourDisplay !== null && total ? (occupancy.get(yourDisplay) || 0) / total : 1;
+    if (yourDisplay !== null && yours < RELEASE_SHARE) {
+      trace(`territory: no screen is clearly yours any more (${Math.round(yours * 100)}%)`);
       yourDisplay = null;
     }
   }
@@ -1001,7 +1038,19 @@ function postX(i, n) {
 
 function chooseTarget() {
   const n = Math.max(1, liveSessions);
-  if (attentionIndex >= 0) return postX(attentionIndex, n);   // go stand there
+  if (attentionIndex >= 0) {
+    // With one session there is only one post, and it sits on whichever screen
+    // the pet is already on -- so a lone session asking for you could never
+    // bring the pet to you. When we know which screen is yours, come to it.
+    if (n <= 1 && yourDisplay !== null) {
+      for (const d of screen.getAllDisplays()) {
+        if (d.id !== yourDisplay) continue;
+        const w = d.workArea;
+        return w.x + (w.width - WIN_W) * 0.82;
+      }
+    }
+    return postX(attentionIndex, n);                          // go stand there
+  }
   if (n === 1) {
     const wa = strip();
     const base = postX(0, 1);
@@ -1073,7 +1122,20 @@ function tickMotion() {
   // display is what pinned the pet to whichever one it booted on, because the
   // edge of that screen was a wall.
   const { x0, x1 } = desktopSpan();
-  nx = Math.max(x0, Math.min(x1, Math.round(nx)));
+  const wanted = Math.round(nx);
+  nx = Math.max(x0, Math.min(x1, wanted));
+  // If the clamp ate the whole step, the target is somewhere the pet cannot
+  // stand -- a post cached before the displays changed, say. Treat arriving at
+  // the edge as arriving, or it walks on the spot at the screen edge forever.
+  if (wanted !== nx && Math.abs(nx - b.x) < 0.5) {
+    trace(`walk abandoned: ${motion.targetX} is off the desk, stopping at ${nx}`);
+    motion.targetX = null;
+    motion.dwellUntil = now + DWELL_MIN;
+    postCache = { key: '', posts: [] };            // rebuild the layout next time
+    setWalking(false, motion.dir);
+    win.setPosition(nx, b.y);
+    return;
+  }
   // Step up or down at a seam between screens of different heights, but only if
   // the pet is walking on the ground: if it has been parked somewhere by hand,
   // leave it where it was put.

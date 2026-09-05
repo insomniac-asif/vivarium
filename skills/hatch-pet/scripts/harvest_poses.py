@@ -2,13 +2,32 @@
 library, then render contact grids for vision review."""
 import json
 import os
+import re
 import sys
 from collections import deque
 from PIL import Image
 
 # the pet being hatched; pass its name so this is not wired to one pet
-RUN = os.path.expanduser(os.environ.get("HATCH_RUN")
-                         or r"~/.claude/pets/.hatch/" + (sys.argv[1] if len(sys.argv) > 1 else "pet"))
+def _run_dir():
+    """The working directory for this hatch.
+
+    The pet's name arrives from a prompt, so it is not allowed to be a path:
+    a pet called "../../../evil" would otherwise put its run directory in the
+    home folder and write there. Keep letters, digits, dash and underscore, and
+    nothing else."""
+    explicit = os.environ.get("HATCH_RUN")
+    if explicit:
+        return os.path.expanduser(explicit)
+    raw = sys.argv[1] if len(sys.argv) > 1 else "pet"
+    safe = re.sub(r"[^A-Za-z0-9_-]", "-", raw).strip("-") or "pet"
+    root = os.path.expanduser("~/.claude/pets/.hatch")
+    run = os.path.normpath(os.path.join(root, safe))
+    if os.path.commonpath([os.path.abspath(root), os.path.abspath(run)]) != os.path.abspath(root):
+        raise SystemExit("hatch: refusing to work outside %s" % root)
+    return run
+
+
+RUN = _run_dir()
 DECODED = os.path.join(RUN, "decoded")
 LIB = os.path.join(RUN, "library")
 GRIDS = os.path.join(RUN, "library-grids")

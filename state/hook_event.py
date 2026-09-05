@@ -68,7 +68,9 @@ def record(data):
         owner = find_owner_pid()
         if owner:
             state["owner_pid"] = owner
-    tmp = path + ".tmp"
+    # unique per process: the statusline writes this same file, and a shared
+    # temp name lets one writer promote the other's half-written bytes
+    tmp = "%s.%d.tmp" % (path, os.getpid())
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f)
     os.replace(tmp, path)
