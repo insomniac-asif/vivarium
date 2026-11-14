@@ -1393,10 +1393,15 @@ ipcMain.on('context-menu', () => {
 });
 
 // liveness beacon: SessionStart hooks spawn the overlay only when this file
-// is missing or stale, so a running overlay is never duplicated
+// is missing or stale, so a running overlay is never duplicated.
+// Rewriting it on every 2 s tick cost a 4 KiB block each time (measured
+// 2 KiB/s, ~170 MiB a day for a pet doing nothing). The hook only needs it
+// younger than 90 s, so refresh it every 30 s, and in between only once the
+// pet has settled somewhere new -- never per step of a walk or a drag.
+const BEACON_REFRESH_MS = 30000;
+let beaconLast = { body: '', at: 0 };
 function beaconWrite() {
   try {
-    fs.mkdirSync(STATE_DIR, { recursive: true });
     let rect = null;
     if (win && !win.isDestroyed()) {
       const b = win.getBounds();
@@ -1404,7 +1409,13 @@ function beaconWrite() {
     }
     // JSON, not a bare pid: the hook only checks this file's freshness, while
     // tooling (and the user) can now also see where the pet actually is.
-    fs.writeFileSync(PIDFILE, JSON.stringify({ pid: process.pid, rect }));
+    const body = JSON.stringify({ pid: process.pid, rect });
+    const now = Date.now();
+    const moving = dragging || !!dragTimer || motion.targetX !== null;
+    if (now - beaconLast.at < BEACON_REFRESH_MS && (body === beaconLast.body || moving)) return;
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+    fs.writeFileSync(PIDFILE, body);
+    beaconLast = { body, at: now };
   } catch {}
 }
 function beaconClear() {
